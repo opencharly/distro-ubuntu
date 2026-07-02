@@ -1,0 +1,15 @@
+ubuntu-debootstrap:
+    candy:
+        # Layerless `from: builder:debootstrap` image (a bootstrap base) — needs a
+        # dedicated version: the runtime requires one for a layerless image on an
+        # external base, and the entity-version migrate backfills only base:-style
+        # bare bases, not from:-style, so it is declared here.
+        version: 2026.144.1443
+        from: builder:debootstrap
+        bootstrap_builder_image: ubuntu-debootstrap-builder
+        build:
+            - deb
+    ubuntu-debootstrap-distro:
+        distro:
+            - ubuntu:24.04
+            - ubuntu
