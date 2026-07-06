@@ -22,7 +22,7 @@
 #  Directly buildable: `charly box build ubuntu` (the build verb defaults to this
 #  charly.yml). From the parent repo: `charly -C box/ubuntu box build
 #  ubuntu`, or anywhere: `charly --repo opencharly/distro-ubuntu box build ubuntu`.
-version: 2026.174.1100
+version: 2026.186.2323
 defaults:
     platform:
         - linux/amd64
@@ -43,8 +43,7 @@ check-ubuntu-debootstrap-vm:
         from: ubuntu-debootstrap
         disposable: true
         lifecycle: dev
-        description: Sole proof the charly toolchain installs as the opencharly .deb via localpkg on a from-scratch debootstrap Ubuntu 24.04 VM, with apt auto-resolving deps and the distro-cascade deterministically picking the ubuntu/noble tailscale repo (not debian/trixie). Boots the ubuntu-debootstrap VM under libvirt/QEMU (UEFI-insecure, q35, ext4, ssh 12229), overlays the charly candy via add_candy, then runs two guest command checks — dpkg -s opencharly/podman/libvirt-daemon-system/tailscale plus charly version (LOCALPKG-DEB-AUTORESOLVE-OK), and grep of tailscale.list for 'stable/ubuntu noble'.
-    check-ubuntu-debootstrap-vm-add_candy:
+        description: Sole proof the charly toolchain installs as the opencharly .deb via localpkg on a from-scratch debootstrap Ubuntu 24.04 VM, with apt auto-resolving deps and the distro-cascade deterministically picking the ubuntu/noble tailscale repo (not debian/trixie). Boots the ubuntu-debootstrap VM under libvirt/QEMU (UEFI-insecure, q35, ext4, an auto-allocated ssh port), overlays the charly candy via add_candy, then runs two guest command checks — dpkg -s opencharly/podman/libvirt-daemon-system/tailscale plus charly version (LOCALPKG-DEB-AUTORESOLVE-OK), and grep of tailscale.list for 'stable/ubuntu noble'.
         # deb localpkg AUTO-RESOLVE witness (ubuntu): charly installed as the
         # `opencharly` .deb via localpkg (one deb source serves Debian + Ubuntu),
         # mandatory deps auto-resolved by apt from Ubuntu main. tailscale is NOT in
@@ -52,30 +51,27 @@ check-ubuntu-debootstrap-vm:
         # it must ALSO be present after deploy.
         add_candy:
             - '@github.com/opencharly/charly/candy/charly:v2026.183.1359'
-    check-ubuntu-debootstrap-vm-install_opts:
         install_opts:
             allow_repo_changes: true
             allow_root_tasks: true
             skip_incompatible: true # skip composed layers lacking a guest-format section; the localpkg .deb/.rpm Depends/Requires install the packages
-    localpkg-deb-autoresolve:
-        check: |
-            command=dpkg -s opencharly >/dev/null 2>&1 &&
-            dpkg -s podman >/dev/null 2>&1 &&
-            dpkg -s libvirt-daemon-system >/dev/null 2>&1 &&
-            dpkg -s tailscale >/dev/null 2>&1 &&
-            command -v charly >/dev/null 2>&1 &&
-            charly version &&
-            echo LOCALPKG-DEB-AUTORESOLVE-OK
-        id: localpkg-deb-autoresolve
-        description: charly installed as the opencharly .deb via localpkg, mandatory deps auto-resolved by apt; tailscale supplied by the charly layer
-        stdout:
-            - contains: LOCALPKG-DEB-AUTORESOLVE-OK
-        exit_status: 0
-        context:
-            - runtime
-        plugin: command
-        plugin_input:
-            command: |
+        plan:
+            - check: |
+                command=dpkg -s opencharly >/dev/null 2>&1 &&
+                dpkg -s podman >/dev/null 2>&1 &&
+                dpkg -s libvirt-daemon-system >/dev/null 2>&1 &&
+                dpkg -s tailscale >/dev/null 2>&1 &&
+                command -v charly >/dev/null 2>&1 &&
+                charly version &&
+                echo LOCALPKG-DEB-AUTORESOLVE-OK
+              id: localpkg-deb-autoresolve
+              description: charly installed as the opencharly .deb via localpkg, mandatory deps auto-resolved by apt; tailscale supplied by the charly layer
+              stdout:
+                - contains: LOCALPKG-DEB-AUTORESOLVE-OK
+              exit_status: 0
+              context:
+                - runtime
+              command: |
                 dpkg -s opencharly >/dev/null 2>&1 &&
                 dpkg -s podman >/dev/null 2>&1 &&
                 dpkg -s libvirt-daemon-system >/dev/null 2>&1 &&
@@ -83,16 +79,13 @@ check-ubuntu-debootstrap-vm:
                 command -v charly >/dev/null 2>&1 &&
                 charly version &&
                 echo LOCALPKG-DEB-AUTORESOLVE-OK
-    tailscale-repo-suite-ubuntu-noble:
-        check: command=grep -h 'pkgs[.]tailscale[.]com/stable/ubuntu noble' /etc/apt/sources.list.d/tailscale.list
-        id: tailscale-repo-suite-ubuntu-noble
-        description: distro-cascade resolves the ubuntu/noble tailscale apt repo (not debian/trixie) deterministically
-        exit_status: 0
-        context:
-            - runtime
-        plugin: command
-        plugin_input:
-            command: grep -h 'pkgs[.]tailscale[.]com/stable/ubuntu noble' /etc/apt/sources.list.d/tailscale.list
+            - check: command=grep -h 'pkgs[.]tailscale[.]com/stable/ubuntu noble' /etc/apt/sources.list.d/tailscale.list
+              id: tailscale-repo-suite-ubuntu-noble
+              description: distro-cascade resolves the ubuntu/noble tailscale apt repo (not debian/trixie) deterministically
+              exit_status: 0
+              context:
+                - runtime
+              command: grep -h 'pkgs[.]tailscale[.]com/stable/ubuntu noble' /etc/apt/sources.list.d/tailscale.list
 # Disposable R10 pod bed for the ubuntu-coder image (kind:check, target:pod) —
 # the pod x ubuntu cross-cell the bootstrap-VM bed above does not cover. Mirrors
 # check-fedora-coder-pod on the deb substrate; ports auto-allocate on 127.0.0.1
@@ -106,27 +99,23 @@ check-ubuntu-coder-pod:
         disposable: true
         lifecycle: dev
         description: R10 bed for the ubuntu-coder image — proves the Ubuntu developer pod (sshd + language runtimes + AI CLIs on the Ubuntu 24.04 noble base) builds and runs as one composed pod. Builds box:ubuntu-coder, deploys, runs the composed baked file/package/service/command checks + charly status --json, and exercises the noble exclude_distros package divergences.
-    status-shows-pod:
-        check: command=charly status --json
-        id: status-shows-pod
-        stdout:
-            - contains: '"kind": "pod"'
-            - contains: check-ubuntu-coder-pod
-        context:
-            - runtime
-        plugin: command
-        plugin_input:
-            command: charly status --json
-            in_container: false
-    noble-base-identity:
-        check: the guest base is Ubuntu noble (not Debian)
-        id: noble-base-identity
-        exit_status: 0
-        context:
-            - runtime
-        plugin: command
-        plugin_input:
-            command: grep -q 'VERSION_CODENAME=noble' /etc/os-release
+        plan:
+            - check: command=charly status --json
+              id: status-shows-pod
+              stdout:
+                - contains: '"kind": "pod"'
+                - contains: check-ubuntu-coder-pod
+              context:
+                - runtime
+              command:
+                command: charly status --json
+                in_container: false
+            - check: the guest base is Ubuntu noble (not Debian)
+              id: noble-base-identity
+              exit_status: 0
+              context:
+                - runtime
+              command: grep -q 'VERSION_CODENAME=noble' /etc/os-release
 ubuntu-debootstrap:
     vm:
         # Bootstrap-from-scratch via debootstrap inside the ubuntu-debootstrap-
@@ -154,10 +143,10 @@ ubuntu-debootstrap:
             mode: user
         ssh:
             user: ubuntu
-            # 12229 (not 12228): the cachyos-gpu operator VM forwards host
-            # 12228; the disposable ubuntu bed moves so it can run alongside
-            # the operator. See the project CHANGELOG/2026-05.md (VM host-port deconfliction).
-            port: 12229
+            # port_auto: the runner allocates a free host SSH port and persists it
+            # in vm_state — no manual deconfliction, so this disposable bed runs
+            # concurrently with any other VM bed AND the cachyos-gpu operator VM.
+            port_auto: true
             key_source: generate
         cloud_init:
             # The ubuntu account (sudo NOPASSWD + /bin/bash + ssh key +

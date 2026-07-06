@@ -14,7 +14,6 @@ ubuntu:
             - pixi
             - npm
             - cargo
-    ubuntu-distro:
         distro:
             - ubuntu:24.04
             - ubuntu

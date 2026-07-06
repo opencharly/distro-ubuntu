@@ -3,10 +3,8 @@ ubuntu-debootstrap-builder:
         base: debian:13
         build:
             - deb
-    ubuntu-debootstrap-builder-distro:
         distro:
             - debian:13
             - debian
-    ubuntu-debootstrap-builder-candy:
         candy:
             - '@github.com/opencharly/charly/candy/debootstrap-builder:v2026.183.1359'

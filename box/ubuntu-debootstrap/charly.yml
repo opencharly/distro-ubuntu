@@ -9,7 +9,6 @@ ubuntu-debootstrap:
         bootstrap_builder_image: ubuntu-debootstrap-builder
         build:
             - deb
-    ubuntu-debootstrap-distro:
         distro:
             - ubuntu:24.04
             - ubuntu
