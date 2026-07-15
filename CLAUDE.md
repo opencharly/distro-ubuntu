@@ -11,9 +11,9 @@ binary (`charly/charly.yml`).
 - `/charly-distros:ubuntu-builder` — the builder image.
 - `/charly-distros:ubuntu-debootstrap`, `/charly-distros:ubuntu-debootstrap-builder` —
   the bootstrap path.
-- `/charly-coder:ubuntu-coder` — the dev image; `/charly-vm:ubuntu` — the bootstrap VM.
+- `/charly-coder:ubuntu-coder` — the dev image; `/charly-vm:ubuntu-debootstrap-vm` — the bootstrap VM.
 
 **Authoritative rules live in the `opencharly` superproject's root `CLAUDE.md`**
 (R0–R10, hard-cutover, AI attribution, git-workflow). This file only signposts
 and restates no rule. The multi-agent workflow is in `/charly-internals:agents`.
-History lives in this repo's `CHANGELOG/` (one file per month).
+History lives in this repo's `CHANGELOG/` (one file per CalVer).
