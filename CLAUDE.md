@@ -16,4 +16,4 @@ binary (`charly/charly.yml`).
 **Authoritative rules live in the `opencharly` superproject's root `CLAUDE.md`**
 (R0–R10, hard-cutover, AI attribution, git-workflow). This file only signposts
 and restates no rule. The multi-agent workflow is in `/charly-internals:agents`.
-History lives in this repo's `CHANGELOG/` (one file per month).
+History lives in this repo's `CHANGELOG/` (one file per CalVer).
