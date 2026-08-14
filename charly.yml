@@ -55,7 +55,7 @@ check-ubuntu-debootstrap-vm:
         # check asserts directly (the sources.list grep proves only that the right
         # suite was selected, not that the package landed).
         add_candy:
-            - '@github.com/opencharly/charly/candy/charly:v2026.201.0706'
+            - '@github.com/opencharly/charly/candy/charly:v2026.226.1719'
         install_opts:
             allow_repo_changes: true
             allow_root_tasks: true
@@ -95,7 +95,7 @@ check-ubuntu-debootstrap-vm:
                 - runtime
               command: |
                 cd /tmp &&
-                charly doctor 2>/dev/null | grep -q 'Summary:' &&
+                /usr/bin/charly doctor 2>/dev/null | grep -q 'Summary:' &&
                 echo WELDED-CMD-PROJECT-LESS-OK
             - check: command=grep -h 'pkgs[.]tailscale[.]com/stable/ubuntu noble' /etc/apt/sources.list.d/tailscale.list
               id: tailscale-repo-suite-ubuntu-noble
