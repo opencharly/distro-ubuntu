@@ -22,7 +22,7 @@
 #  Directly buildable: `charly box build ubuntu` (the build verb defaults to this
 #  charly.yml). From the parent repo: `charly -C box/ubuntu box build
 #  ubuntu`, or anywhere: `charly --repo opencharly/distro-ubuntu box build ubuntu`.
-version: 2026.223.1018
+version: 2026.225.1508
 defaults:
     platform:
         - linux/amd64
