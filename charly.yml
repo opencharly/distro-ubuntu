@@ -43,12 +43,17 @@ check-ubuntu-debootstrap-vm:
         from: ubuntu-debootstrap
         disposable: true
         lifecycle: dev
-        description: Sole proof the charly toolchain installs on a from-scratch debootstrap Ubuntu 24.04 VM — the charly candy's copy step lands the binary at /usr/bin/charly, the composed virtualization/gocryptfs/socat layers install their deps, and the tailscale apt-repo distro-cascade deterministically picks ubuntu/noble. Boots the ubuntu-debootstrap VM under libvirt/QEMU (UEFI-insecure, q35, ext4, an auto-allocated ssh port), overlays the charly candy via add_candy, then runs guest command checks — charly binary + version (CHARLY-BINARY-OK), the welded command plugins dispatching project-less (WELDED-CMD-PROJECT-LESS-OK), and grep of tailscale.list for 'stable/ubuntu noble'.
+        description: Sole proof the charly toolchain installs on a from-scratch debootstrap Ubuntu 24.04 VM — the charly candy's copy step lands the binary at /usr/bin/charly, the composed virtualization/gocryptfs/socat layers install their deps, and the tailscale apt-repo distro-cascade deterministically picks ubuntu/noble. Boots the ubuntu-debootstrap VM under libvirt/QEMU (UEFI-insecure, q35, ext4, an auto-allocated ssh port), overlays the charly candy via add_candy, then runs four guest command checks — the binary present and executable at /usr/bin/charly (CHARLY-BINARY-OK), the welded command plugins dispatching project-less (WELDED-CMD-PROJECT-LESS-OK), the tailscale package installed (TAILSCALE-PKG-OK), and grep of tailscale.list for 'stable/ubuntu noble'.
         # charly binary install witness: the charly candy's copy step lands the
         # in-development binary at /usr/bin/charly (the localpkg package install is
-        # removed by the remove-candy-localpkg cutover). tailscale is NOT in the
-        # binary — the charly candy supplies it via the tailscale apt repo, so it
-        # must ALSO be present after deploy.
+        # removed by the remove-candy-localpkg cutover). Every assertion below is
+        # anchored on the MECHANISM: the deploy stages its own host binary under
+        # /tmp for its own use, so only a /usr/bin/charly-anchored probe can tell
+        # a real candy install from the deploy's scaffolding. tailscale is NOT in
+        # the binary — the charly candy supplies it via the tailscale apt repo, so
+        # it must ALSO be present after deploy, which the tailscale-package-installed
+        # check asserts directly (the sources.list grep proves only that the right
+        # suite was selected, not that the package landed).
         add_candy:
             - '@github.com/opencharly/charly/candy/charly:v2026.201.0706'
         install_opts:
@@ -57,20 +62,29 @@ check-ubuntu-debootstrap-vm:
             skip_incompatible: true # skip composed layers lacking a guest-format section; the charly candy's copy step + composed layers install the binary and deps
         plan:
             - check: |
-                command=command -v charly >/dev/null 2>&1 &&
-                charly version &&
+                command=test -x /usr/bin/charly &&
+                /usr/bin/charly version &&
                 echo CHARLY-BINARY-OK
               id: charly-binary-installed
-              description: charly binary installed on the guest via the charly candy's copy step (the localpkg package install is removed by the remove-candy-localpkg cutover)
+              description: charly binary installed on the guest AT /usr/bin/charly via the charly candy's copy step (the localpkg package install is removed by the remove-candy-localpkg cutover). Path-anchored deliberately — the deploy stages its OWN host binary at a versioned /tmp path for deploy use (spec/exec/charly_install.go, which never alters PATH), so an unanchored `command -v charly` passes even when the candy installed nothing and cannot discriminate the install mechanism this step names.
               stdout:
                 - contains: CHARLY-BINARY-OK
               exit_status: 0
               context:
                 - runtime
               command: |
-                command -v charly >/dev/null 2>&1 &&
-                charly version &&
+                test -x /usr/bin/charly &&
+                /usr/bin/charly version &&
                 echo CHARLY-BINARY-OK
+            - check: command=dpkg -s tailscale >/dev/null 2>&1 && echo TAILSCALE-PKG-OK
+              id: tailscale-package-installed
+              description: the tailscale PACKAGE reached the guest via the charly candy's tailscale apt repo — tailscale is not in the charly binary, so the apt-repo cascade delivering it is exactly what this bed exists to prove. Asserting the sources.list entry alone would prove the repo was configured, not that the package installed.
+              stdout:
+                - contains: TAILSCALE-PKG-OK
+              exit_status: 0
+              context:
+                - runtime
+              command: dpkg -s tailscale >/dev/null 2>&1 && echo TAILSCALE-PKG-OK
             - check: the welded command plugins dispatch project-less from the installed charly binary
               id: welded-command-project-less
               description: the charly binary's compiled-in command:<word> plugins (doctor/vm/clean/…) dispatch project-less from /tmp on the installed binary
