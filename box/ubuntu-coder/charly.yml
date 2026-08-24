@@ -20,7 +20,7 @@ ubuntu-coder:
             - '@github.com/opencharly/charly/candy/pre-commit:v2026.201.0706'
             - '@github.com/opencharly/charly/candy/direnv:v2026.201.0706'
             - '@github.com/opencharly/charly/candy/gh:v2026.201.0706'
-            - '@github.com/opencharly/charly/candy/typst:v2026.201.0706'
+            - '@github.com/opencharly/charly/candy/typst:v2026.236.0627'
             - '@github.com/opencharly/charly/candy/asciinema:v2026.201.0706'
             - '@github.com/opencharly/charly/candy/claude-code:v2026.201.0706'
             - '@github.com/opencharly/charly/candy/codex:v2026.201.0706'
