@@ -6,6 +6,6 @@ ubuntu-builder:
             - npm
             - cargo
         candy:
-            - '@github.com/opencharly/charly/candy/pixi:v2026.201.0706'
+            - '@github.com/opencharly/layer-pixi:v2026.237.457'
             - '@github.com/opencharly/layer-nodejs:v2026.235.2056'
-            - '@github.com/opencharly/charly/candy/build-toolchain:v2026.201.0706'
+            - '@github.com/opencharly/layer-build-toolchain:v2026.237.455'

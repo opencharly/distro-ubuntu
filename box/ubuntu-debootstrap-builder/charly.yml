@@ -7,4 +7,4 @@ ubuntu-debootstrap-builder:
             - debian:13
             - debian
         candy:
-            - '@github.com/opencharly/charly/candy/debootstrap-builder:v2026.201.0706'
+            - '@github.com/opencharly/layer-debootstrap-builder:v2026.237.456'
