@@ -20,7 +20,7 @@ ubuntu-coder:
             - '@github.com/opencharly/layer-pre-commit:v2026.239.1552'
             - '@github.com/opencharly/layer-direnv:v2026.239.1629'
             - '@github.com/opencharly/layer-gh:v2026.239.1624'
-            - '@github.com/opencharly/layer-typst:v2026.239.1645'
+            - '@github.com/opencharly/layer-typst:v2026.240.1854'
             - '@github.com/opencharly/layer-asciinema:v2026.240.0119'
             - '@github.com/opencharly/layer-claude-code:v2026.239.1626'
             - '@github.com/opencharly/layer-codex:v2026.239.1634'
