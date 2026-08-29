@@ -55,7 +55,7 @@ check-ubuntu-debootstrap-vm:
         # check asserts directly (the sources.list grep proves only that the right
         # suite was selected, not that the package landed).
         add_candy:
-            - '@github.com/opencharly/charly/candy/charly:v2026.236.0956'
+            - '@github.com/opencharly/charly/candy/charly:v2026.241.0413'
         install_opts:
             allow_repo_changes: true
             allow_root_tasks: true
