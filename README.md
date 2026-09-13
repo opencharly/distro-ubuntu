@@ -18,7 +18,7 @@ This repo contains **no candies of its own** and carries no build-config file.
 Everything is pulled from `github.com/opencharly/charly` by **github reference**,
 and the shared build vocabulary is embedded in the `charly` binary:
 
-- every candy in `charly.yml` is an `@github.com/opencharly/charly/candy/<name>:<tag>` ref;
+- every candy in `charly.yml` is an `@github.com/opencharly/<layer-*|pod-*|plugin-*>[:subdir]:<tag>` ref;
 - the distro/builder/init build vocabulary is **embedded in the `charly` binary**
   (`charly/charly.yml`) — `import:` is empty (`import: []`). Ubuntu is deb-family:
   `distro.ubuntu` is `inherits: debian`, and the embedded vocabulary carries BOTH
@@ -29,7 +29,7 @@ and the shared build vocabulary is embedded in the `charly` binary:
 The `ubuntu` base roots at the upstream docker.io `ubuntu:24.04` image directly
 (the `ubuntu-debootstrap-builder` is `base: debian:13`, since debootstrap is a
 Debian tool), so this repo needs **no remote base include**. All references pin
-to a single tag of the upstream repo, so a build is reproducible. There is
+to explicit CalVer tags, so a build is reproducible. There is
 exactly one definition of every layer — no duplication.
 
 ## No coupling with main
@@ -63,15 +63,15 @@ The first build resolves the upstream github references into
 `ubuntu-debootstrap` builds an Ubuntu rootfs from scratch via `debootstrap`
 inside the privileged `ubuntu-debootstrap-builder` container (`from:
 builder:debootstrap`). `check-ubuntu-debootstrap-vm` boots that rootfs under
-libvirt/QEMU and carries `disposable: true`, so `charly -C box/ubuntu update
+libvirt/QEMU and carries `disposable: true`, so `charly -C box/ubuntu check run
 check-ubuntu-debootstrap-vm` rebuilds it unattended.
 
 ## Requirements
 
 A build of any image here fetches from the upstream repo, so it needs network
 access and a `charly` recent enough to understand the config's schema version
-(`charly` hard-fails with an "update charly" message if the config is newer than the
-binary supports).
+(`charly` hard-fails with a "newer than this charly supports" message if the config
+schema is newer than the binary supports).
 
 ---
 *Assisted-by: Claude*
