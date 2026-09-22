@@ -22,7 +22,7 @@
 #  Directly buildable: `charly box build ubuntu` (the build verb defaults to this
 #  charly.yml). From the parent repo: `charly -C box/ubuntu box build
 #  ubuntu`, or anywhere: `charly --repo opencharly/distro-ubuntu box build ubuntu`.
-version: 2026.240.1943
+version: 2026.249.2125
 defaults:
     platform:
         - linux/amd64
@@ -180,3 +180,598 @@ discover:
       recursive: true
     - path: candy
       recursive: true
+ubuntu-builder-skill:
+    skill:
+        name: ubuntu-builder
+        family: distros
+        owner: ubuntu-builder
+        description: |-
+            Minimal Ubuntu 24.04 builder image (pixi + Node.js + build-toolchain)
+            used as the multi-stage builder for Ubuntu-based boxes — currently
+            ubuntu-coder. Runs as uid 1000 `ubuntu` (adopted from the upstream
+            ubuntu:24.04 base image via the embedded distro vocabulary's base_user declaration).
+            MUST be invoked before building, deploying, configuring, or troubleshooting
+            the ubuntu-builder box.
+        triggers:
+            - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
+        content: |
+            # ubuntu-builder
+            
+            Ubuntu 24.04 (noble) counterpart of `/charly-distros:fedora-builder` and `/charly-distros:debian-builder`. Same role — pixi/npm/cargo multi-stage builder — with one important difference: the builder runs as `ubuntu` (uid 1000) because the upstream `ubuntu:24.04` base image ships a pre-existing `ubuntu:ubuntu` account at uid 1000, and the embedded `distro.ubuntu.base_user` vocabulary adopts it.
+            
+            Lives in the **`opencharly/distro-ubuntu`** repo (git submodule at **`box/ubuntu`**).
+            Build it from the submodule: `charly -C box/ubuntu box build ubuntu-builder`
+            (normally builds implicitly as a dependency of `ubuntu-coder`). Its
+            `pixi`/`nodejs`/`build-toolchain` candies are pulled by github reference from the
+            main repo.
+            
+            ## Box Properties
+            
+            | Property | Value |
+            |----------|-------|
+            | Base | `ubuntu` (which = `ubuntu:24.04` + our bootstrap) |
+            | Layers | `pixi`, `nodejs`, `build-toolchain` |
+            | Platforms | `linux/amd64` |
+            | Registry | `ghcr.io/opencharly` |
+            | User | `ubuntu` / uid 1000 (**adopt mode** — see `/charly-image:image` "user_policy") |
+            | Home | `/home/ubuntu` |
+            
+            ## Full candy stack
+            
+            1. `/charly-distros:ubuntu` — Ubuntu 24.04 + bootstrap. Inherits Debian's `apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg` pattern because the embedded `distro.ubuntu` vocabulary declares `inherits: debian`. Ubuntu-specific: `base_user: { name: ubuntu, uid: 1000, gid: 1000, home: /home/ubuntu }` — no `useradd` step emitted.
+            2. `/charly-languages:pixi` — pixi package manager + env paths (`/home/ubuntu/.pixi`).
+            3. `/charly-coder:nodejs` — Node.js + npm (generic `nodejs`).
+            4. `/charly-coder:build-toolchain` — same Debian `-dev` packages as `/charly-distros:debian-builder`.
+            
+            ## Adopt-mode semantics
+            
+            When the generator emits the Containerfile for this image, the bootstrap section contains:
+            
+            ```
+            # User ubuntu (uid=1000) adopted from base image (declared in the embedded distro.base_user vocabulary) — no useradd needed
+            WORKDIR /home/ubuntu
+            USER 1000
+            ```
+            
+            No `useradd`, no `groupadd`, no `usermod -l` rename. The upstream `ubuntu:ubuntu` account is honored verbatim — HOME, npm prefix, pixi env, cargo home, sudoers all derive from `resolved.User = "ubuntu"`. See `/charly-image:image` "user_policy" and `/charly-internals:generate-source` "writeBootstrap".
+            
+            ## Role in the build system
+            
+            Declares `builds: [pixi, npm, cargo]` and is referenced from `ubuntu:` as:
+            
+            ```yaml
+            ubuntu:
+              builder:
+                pixi: ubuntu-builder
+                npm: ubuntu-builder
+                cargo: ubuntu-builder
+            ```
+            
+            During `charly box build ubuntu-coder`, cargo/npm/pixi-owning candies get their `FROM ubuntu-builder AS <layer>-<type>-build` stages from this image, then `COPY --from=<stage> --chown=1000:1000 /home/ubuntu /home/ubuntu` into the final ubuntu-coder. (The `--chown=1000:1000` numeric form works uniformly regardless of user name — see `/charly-coder:build-toolchain` for the builder-artifact COPY pattern.)
+            
+            ## Cross-distro sibling builders
+            
+            - `/charly-distros:fedora-builder` — RPM-family, `user:user` uid 1000 (create).
+            - `/charly-distros:debian-builder` — deb-family, Debian 13, `user:user` (create — Debian 13 ships no pre-existing uid-1000 user).
+            - `/charly-distros:arch-builder` — pacman-family, `user:user` + `yay` for AUR.
+            
+            The three builders have near-identical candy stacks (pixi + nodejs + build-toolchain). The only meaningful divergence is this box's adopt-mode `ubuntu:ubuntu` identity.
+            
+            ## Quick start
+            
+            ```bash
+            charly -C box/ubuntu box build ubuntu-builder
+            charly shell ubuntu-builder               # drops you into /home/ubuntu as uid 1000
+            id                                    # uid=1000(ubuntu) gid=1000(ubuntu)
+            ```
+            
+            Typically not invoked directly — it's a build-time dependency of `/charly-coder:ubuntu-coder`.
+            
+            ## Verification
+            
+            - `charly -C box/ubuntu box list | grep ubuntu-builder`
+            - `charly shell ubuntu-builder -- id` → `uid=1000(ubuntu) gid=1000(ubuntu)`
+            - `charly shell ubuntu-builder -- pixi --version && node --version && gcc --version`
+            
+            ## Related boxes
+            
+            - `/charly-distros:ubuntu` — parent base; declares `base_user:` in the embedded distro vocabulary.
+            - `/charly-coder:ubuntu-coder` — the consumer that this builder serves.
+            - `/charly-distros:debian-builder` — deb-family sibling without adopt mode.
+            - `/charly-distros:fedora-builder` — canonical RPM-family sibling.
+            
+            ## Related candies
+            
+            - `/charly-languages:pixi`, `/charly-coder:nodejs`, `/charly-coder:build-toolchain`
+            
+            ## Related commands
+            
+            - `/charly-build:build` — `base_user:` declaration format in the embedded `distro.*` vocabulary
+            - `/charly-image:image` — `user_policy:` field (auto / adopt / create) and the decision table
+            - `/charly-build:generate` — adopt-vs-create writeBootstrap emission modes
+            
+            ## When to use this skill
+            
+            **MUST be invoked** when:
+            
+            - Building or troubleshooting `ubuntu-builder` itself.
+            - Debugging multi-stage COPY-from errors or permission issues in a `ubuntu-coder` build (this is the source stage; uid 1000 = `ubuntu` by adoption).
+            - Understanding why `${HOME}` = `/home/ubuntu` (not `/home/user`) inside builder stages.
+
+ubuntu-coder-skill:
+    skill:
+        name: ubuntu-coder
+        family: coder
+        owner: ubuntu-coder
+        description: |-
+            Kitchen-sink development box on Ubuntu 24.04 noble: coding + AI-coding
+            CLIs + DevOps tooling in one container. Ubuntu base, 30+ direct candies
+            mirroring fedora-coder's stack. Runs as uid 1000 `ubuntu` — the upstream
+            ubuntu:24.04 account, adopted verbatim via the embedded build
+            vocabulary's base_user declaration. 142/0/1-skip tests pass.
+            Use when working with the ubuntu-coder box — especially when the
+            `${USER}` / `${HOME}` / sudoers differ from the other three coder boxes.
+        triggers:
+            - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
+        content: |-
+            # ubuntu-coder
+            
+            Ubuntu 24.04 noble counterpart of `/charly-coder:fedora-coder`. Same 80-line test block, same large candy list, same rootless posture — but **the resolved user is `ubuntu` (not `user`)** because the upstream `ubuntu:24.04` base image ships a pre-existing `ubuntu:ubuntu` account at uid 1000, and the embedded `distro.ubuntu` vocabulary declares `base_user:` to adopt it. Everything that touches the user account — `${HOME}`, npm prefix, pixi env, sudoers — derives from `resolved.User = "ubuntu"`.
+            
+            > **Location:** lives in the **`opencharly/distro-ubuntu`** repo (git submodule at
+            > **`box/ubuntu`**) — a SEPARATE repo from `opencharly/distro-debian`. Its
+            > candies are pulled by github reference from the main repo. Build/validate from
+            > the submodule: `charly -C box/ubuntu box build ubuntu-coder`, or
+            > `charly --repo opencharly/distro-ubuntu box build ubuntu-coder`. Deploy-mode verbs
+            > read the built image's OCI labels and work from anywhere once it's local.
+            
+            ## Definition
+            
+            ```yaml
+            ubuntu-coder:
+              base: ubuntu
+              ports:
+                - "2222:2222"                 # sshd-wrapper
+                - "18765:18765"               # charly-mcp (Streamable HTTP)
+              candy:
+                # Same stack as debian-coder — see that skill for the full list
+                - agent-forwarding
+                - sshd
+                - charly
+                - charly-mcp
+                - container-nesting
+                - '@github.com/opencharly/pod-dbus'
+                - '@github.com/opencharly/layer-tmux'
+                - language-runtimes
+                - '@github.com/opencharly/layer-golang'
+                - '@github.com/opencharly/layer-nodejs'
+                - rust
+                - pixi
+                - uv
+                - build-toolchain
+                - dev-tools
+                - pre-commit
+                - direnv
+                - gh
+                - typst
+                - asciinema
+                - claude-code
+                - codex
+                - '@github.com/opencharly/layer-gemini'
+                - forgecode
+                - oracle
+                - devops-tools
+                - '@github.com/opencharly/layer-kubernetes'
+                - docker-ce
+                - github-actions
+                - google-cloud
+                - google-cloud-npm
+                - grafana-tools
+            ```
+            
+            ## User model — adopt mode
+            
+            The embedded build vocabulary (`charly/charly.yml`) declares `distro.ubuntu.base_user`:
+            
+            ```yaml
+            base_user:
+              name: ubuntu
+              uid: 1000
+              gid: 1000
+              home: /home/ubuntu
+            ```
+            
+            `ubuntu-coder` doesn't set an explicit `user:` field, so `user_policy: auto` (the default) adopts the base_user. The generator emits no `useradd` — the bootstrap section is a one-line comment:
+            
+            ```
+            # User ubuntu (uid=1000) adopted from base image (declared in the embedded distro.base_user) — no useradd needed
+            WORKDIR /home/ubuntu
+            USER 1000
+            ```
+            
+            Resolved identity: `User=ubuntu, UID=1000, GID=1000, Home=/home/ubuntu`. The image's OCI labels carry these values (`ai.opencharly.user="ubuntu"`, `ai.opencharly.home="/home/ubuntu"`) so deploy-mode quadlets and `charly shell` find them without re-reading `charly.yml`.
+            
+            **Why adopt over rename?** Ubuntu's cloud-init tooling, documentation, and `/etc/passwd` metadata all expect the user to be named `ubuntu`. Renaming fights the upstream contract. Adopting honors it. See `/charly-image:image` "user_policy" for the full rationale and the 3-value policy table.
+            
+            ## Live verification
+            
+            ```
+            $ charly shell ubuntu-coder -c 'id; /usr/bin/dotnet --version; sudo -l'
+            uid=1000(ubuntu) gid=1000(ubuntu) groups=1000(ubuntu),4(adm),20(dialout),24(cdrom),25(floppy),27(sudo),29(audio),30(dip),44(video),46(plugdev),105(libvirt)
+            9.0.313
+            User ubuntu may run the following commands on <host>:
+                (ALL : ALL) ALL
+            ```
+            
+            ## Security posture
+            
+            Identical to `/charly-coder:debian-coder` — the only diff is `User` field.
+            
+            | Field | Value | Source |
+            |---|---|---|
+            | `cap_add` | **(empty)** | — |
+            | `security_opt` | `[unmask=/proc/*]` | `/charly-distros:container-nesting` |
+            | `devices` | `[/dev/fuse, /dev/net/tun]` | `/charly-distros:container-nesting` |
+            | `privileged` | `false` | — |
+            | Network | bridge | defaults |
+            | UID / user | `1000 / ubuntu` | **adopt mode** |
+            | sudo | passwordless via `/etc/sudoers.d/charly-user` (discovered via `getent passwd 1000` → `ubuntu`) | `/charly-coder:sshd` |
+            
+            ## Ubuntu-specific layer quirks (differences vs debian-coder)
+            
+            - **fastfetch test is skipped** via `exclude_distros: [ubuntu:24.04]` (`/charly-coder:dev-tools`). Ubuntu 24.04 noble main does not ship `fastfetch` (Debian 13 trixie does, and so do Fedora/Arch). Skipping is cleaner than failing — see `/charly-check:check` for the `exclude_distros:` field of the declarative-test schema.
+            - **dotnet-sdk-9.0 source**: uses Microsoft's `dotnet-install.sh` (same as debian-coder). Note: Canonical's noble main/universe ships `dotnet-sdk-8.0` and `dotnet-sdk-10.0` but NOT 9.0; Microsoft's noble apt repo ships 10.0 only. `dotnet-install.sh --channel 9.0` is the only cross-distro-consistent path to .NET 9. See `/charly-coder:language-runtimes`.
+            - **Everything else** is identical to debian-coder. The sudoers `getent` discovery, bat→batcat symlink, virtualization package-existence tests — all are implemented once in the respective candies and work uniformly on both debian-coder and ubuntu-coder.
+            
+            ## Test results
+            
+            `charly check box ghcr.io/opencharly/ubuntu-coder:latest` — **142 passed · 0 failed · 1 skipped** (fastfetch, by design).
+            
+            ## Verification recipe
+            
+            ```bash
+            # 1. Validate
+            charly -C box/ubuntu box validate
+            
+            # 2. Build (auto-chains: ubuntu → ubuntu-builder → ubuntu-coder)
+            charly -C box/ubuntu box build ubuntu-coder
+            
+            # 3. Disposable-container tests
+            charly check box ghcr.io/opencharly/ubuntu-coder:latest
+            
+            # 4. Confirm adopt mode at runtime
+            charly shell ubuntu-coder -c "id"
+            # → uid=1000(ubuntu) gid=1000(ubuntu) ...
+            
+            # 5. Deploy + live tests
+            charly config ubuntu-coder
+            charly start ubuntu-coder
+            charly check box ghcr.io/opencharly/ubuntu-coder:latest
+            ```
+            
+            ## Gotcha: Dockerhub rate-limits during base pulls
+            
+            Rebuilding the `ubuntu` base image pulls from `docker.io/library/ubuntu:24.04`. Unauthenticated Dockerhub pulls are rate-limited (100/6h per IP). If the build fails with `toomanyrequests`, the cleanest workaround is to pull from a non-Dockerhub mirror and retag:
+            
+            ```bash
+            podman pull public.ecr.aws/docker/library/ubuntu:24.04
+            podman tag public.ecr.aws/docker/library/ubuntu:24.04 docker.io/library/ubuntu:24.04
+            charly box build ubuntu-coder
+            ```
+            
+            AWS ECR Public mirrors the Dockerhub library namespace without rate-limiting unauthenticated pulls.
+            
+            ## Ports
+            
+            | Port | Service | Bound by |
+            |---|---|---|
+            | 2222 | sshd-wrapper (SSH as `ubuntu` with sudo) | `/charly-coder:sshd` |
+            | 18765 | charly-mcp | `/charly-coder:charly-mcp` |
+            
+            Conflicts with the other three coder-family boxes on these ports.
+            
+            ## Image size
+            
+            ~10.2 GB uncompressed, nearly identical to `/charly-coder:debian-coder`.
+            
+            ## Cross-distro siblings
+            
+            - `/charly-coder:fedora-coder` — RPM-family, `user:user` create.
+            - `/charly-coder:arch-coder` — pacman-family + AUR, `user:user` create.
+            - `/charly-coder:debian-coder` — deb on Debian 13, `user:user` create.
+            - `/charly-coder:ubuntu-coder` — this box; deb on Ubuntu 24.04, `user:ubuntu` **adopt**.
+            
+            ## Related boxes
+            
+            - `/charly-distros:ubuntu` — parent base; declares `base_user:` in the embedded build vocabulary.
+            - `/charly-distros:ubuntu-builder` — multi-stage builder, also runs as `ubuntu:1000`.
+            
+            ## Related layers
+            
+            - `/charly-coder:sshd` — getent-based sudoers (works regardless of whether the uid-1000 account is `user` or `ubuntu`).
+            - `/charly-coder:dev-tools` — bat→batcat + fastfetch `exclude_distros`.
+            - `/charly-coder:language-runtimes` — Microsoft `dotnet-install.sh` for .NET 9.
+            - `/charly-infrastructure:virtualization` — `package:` + `package_map:` tests.
+            - `/charly-distros:container-nesting`, `/charly-tools:charly`, `/charly-coder:charly-mcp` — shared rootless baseline.
+            
+            ## Related commands
+            
+            - `/charly-image:image` — **`user_policy:` field** (the pivot for this box's behavior).
+            - `/charly-build:build` — **`base_user:` declaration** (where `ubuntu:1000` is declared).
+            - `/charly-check:check` — `exclude_distros:` field reference.
+            - `/charly-build:generate` — adopt-vs-create writeBootstrap emission.
+            - `/charly-core:shell`, `/charly-core:charly-config`, `/charly-core:start`, `/charly-core:stop`.
+            
+            ## When to use this skill
+            
+            **MUST be invoked** when:
+            
+            - Building, deploying, or troubleshooting `ubuntu-coder`.
+            - Debugging any behavior that depends on `${USER}` or `${HOME}` inside an Ubuntu container (they resolve to `ubuntu` / `/home/ubuntu`, not `user` / `/home/user`).
+            - Writing a candy whose content references the uid-1000 account by name — it must not hardcode `user`; use `getent passwd 1000` or `${USER}` substitution in task fields where the generator expands it.
+            - Understanding Dockerhub rate-limit workarounds during base-image rebuilds.
+ubuntu-debootstrap-builder-skill:
+    skill:
+        name: ubuntu-debootstrap-builder
+        family: distros
+        owner: ubuntu-debootstrap-builder
+        description: |-
+            Privileged debootstrap builder image (base: debian:13 — debootstrap is a
+            Debian tool that bootstraps Ubuntu suites too) — ships the debootstrap
+            toolchain for ubuntu-debootstrap and the ubuntu-debootstrap VM. Lives in the
+            opencharly/distro-ubuntu submodule (box/ubuntu).
+            MUST be invoked before building or troubleshooting ubuntu-debootstrap-builder.
+        content: |
+            # ubuntu-debootstrap-builder
+            
+            Privileged builder image that ships the **debootstrap** toolchain (the
+            `debootstrap-builder` candy). It is the `from: builder:debootstrap` /
+            `bootstrap_builder_image:` target for `/charly-distros:ubuntu-debootstrap` and the
+            `/charly-vm:ubuntu-debootstrap-vm` bootstrap VM.
+            
+            > **Lives in `opencharly/distro-ubuntu`** (git submodule at `box/ubuntu`). Build:
+            > `charly -C box/ubuntu box build ubuntu-debootstrap-builder`.
+            
+            ## Box Properties
+            
+            | Property | Value |
+            |----------|-------|
+            | Base | `debian:13` (debootstrap is a Debian tool — it bootstraps Ubuntu suites from a Debian builder) |
+            | Distro | debian:13, debian |
+            | Build | deb |
+            | Layer | `debootstrap-builder` (pulled by github reference from the main repo) |
+            | Home repo | opencharly/distro-ubuntu (`box/ubuntu`) |
+            
+            The `debootstrap-builder` candy **stays in the main repo** and is shared with
+            `/charly-distros:debian-debootstrap-builder` — both pull it by github reference. The
+            `ubuntu` distro config (`inherits: debian`; debootstrap suite `noble`, mirror
+            `http://archive.ubuntu.com/ubuntu`, base packages) lives in the main repo's
+            embedded `distro:` vocabulary (`charly/charly.yml`) and resolves automatically —
+            the submodule imports nothing (`import: []`).
+            
+            ## Cross-References
+            
+            - `/charly-distros:ubuntu` — the Docker-Hub base (`base: ubuntu:24.04`)
+            - `/charly-distros:ubuntu-debootstrap` — the bootstrap-from-scratch rootfs it builds
+            - `/charly-vm:ubuntu-debootstrap-vm` — the VM built via the same debootstrap path
+            - `/charly-distros:debian-debootstrap-builder` — the Debian sibling (same `base: debian:13`)
+            
+            ## When to Use This Skill
+            
+            **MUST be invoked** before building or debugging the Ubuntu debootstrap builder.
+            Invoke BEFORE reading source code or launching Explore agents.
+
+ubuntu-debootstrap-skill:
+    skill:
+        name: ubuntu-debootstrap
+        family: distros
+        owner: ubuntu-debootstrap
+        description: |-
+            Bootstrap-from-scratch Ubuntu 24.04 rootfs via debootstrap inside a privileged
+            builder (from: builder:debootstrap, bootstrap_builder_image:
+            ubuntu-debootstrap-builder). Retained for offline/air-gapped builds. Lives in
+            the opencharly/distro-ubuntu submodule (box/ubuntu).
+            MUST be invoked before building or troubleshooting ubuntu-debootstrap.
+        triggers:
+            - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
+        content: |
+            # ubuntu-debootstrap
+            
+            Bootstrap-from-scratch Ubuntu 24.04 (noble) root filesystem, built via
+            `debootstrap` inside the privileged `/charly-distros:ubuntu-debootstrap-builder`
+            container (`from: builder:debootstrap`,
+            `bootstrap_builder_image: ubuntu-debootstrap-builder`).
+            
+            > **Lives in `opencharly/distro-ubuntu`** (git submodule at `box/ubuntu`). Build:
+            > `charly -C box/ubuntu box build ubuntu-debootstrap`.
+            
+            ## When to use it (and when not)
+            
+            The canonical Ubuntu base (`/charly-distros:ubuntu`) pulls the upstream-published
+            `ubuntu:24.04` OCI image from Docker Hub — that is the recommended, faster path.
+            This debootstrap variant exists for **offline / air-gapped** builds and as a
+            worked example of the `from: builder:debootstrap` pattern.
+            
+            ## Box Properties
+            
+            | Property | Value |
+            |----------|-------|
+            | From | builder:debootstrap |
+            | bootstrap_builder_image | ubuntu-debootstrap-builder |
+            | Distro | ubuntu:24.04, ubuntu, debian |
+            | Build | deb |
+            | Home repo | opencharly/distro-ubuntu (`box/ubuntu`) |
+            
+            The `ubuntu` distro config (`inherits: debian`; debootstrap suite `noble`,
+            mirror `http://archive.ubuntu.com/ubuntu`, components `main,universe`) lives in
+            the embedded build vocabulary (`charly/charly.yml`, baked into the `charly`
+            binary). The embedded vocabulary carries BOTH the `ubuntu` and `debian` distro
+            configs, so the `inherits: debian` resolution needs no reference to
+            `opencharly/distro-debian`.
+            
+            ## Cross-References
+            
+            - `/charly-distros:ubuntu` — the recommended Docker-Hub base
+            - `/charly-distros:ubuntu-debootstrap-builder` — the privileged builder it uses
+            - `/charly-vm:ubuntu-debootstrap-vm` — the VM built via the same debootstrap path
+            
+            ## When to Use This Skill
+            
+            **MUST be invoked** before building or debugging the Ubuntu debootstrap rootfs.
+            Invoke BEFORE reading source code or launching Explore agents.
+
+ubuntu-skill:
+    skill:
+        name: ubuntu
+        family: distros
+        owner: ubuntu
+        description: |-
+            Base Ubuntu 24.04 noble image. Root of the box hierarchy for Ubuntu-
+            based builds. Runs as uid 1000 `ubuntu` via ADOPT mode — the upstream
+            ubuntu:24.04 base image ships a pre-existing ubuntu:ubuntu account,
+            and the embedded distro.ubuntu vocabulary declares base_user to adopt it verbatim.
+            MUST be invoked before building, deploying, configuring, or troubleshooting
+            any Ubuntu-based box.
+        triggers:
+            - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
+        content: |
+            # ubuntu
+            
+            Base Ubuntu 24.04 (noble) image. Distinguished from `/charly-distros:debian` by **adopt mode**: the upstream `ubuntu:24.04` base image ships a pre-existing `ubuntu:ubuntu` account at uid 1000, and the embedded `distro.ubuntu` vocabulary declares `base_user:` so the `charly` generator honors that account rather than creating a new one.
+            
+            The Ubuntu family lives in its own **`opencharly/distro-ubuntu`** repo (git submodule
+            at **`box/ubuntu`**) — a SEPARATE repo from `opencharly/distro-debian` (Debian and
+            Ubuntu each have their own repo). The `ubuntu` base is **owned there** and
+            composes the main repo's candies by git reference plus the embedded build vocabulary. Because
+            `distro.ubuntu` is `inherits: debian`, the embedded build vocabulary (which
+            carries BOTH distro configs) resolves the inheritance — `opencharly/distro-ubuntu`
+            needs no reference to `opencharly/distro-debian`. Build from the submodule:
+            `charly -C box/ubuntu box build ubuntu` (or `charly --repo opencharly/distro-ubuntu box build ubuntu`).
+            Nothing in main consumes any Ubuntu box, so there is **no main ↔ ubuntu coupling**.
+            
+            ## Box Properties
+            
+            | Property | Value |
+            |----------|-------|
+            | Base | `ubuntu:24.04` |
+            | Pkg | `deb` |
+            | Distro tags | `["ubuntu:24.04", "ubuntu"]` (symmetric with a `target: vm` deploy's `distroTagChain`; NO `debian` fallback — every deb-family layer carries an explicit `ubuntu` section, and the cascade would otherwise UNION debian-only packages onto ubuntu) |
+            | Layers | (none — base image only) |
+            | Platforms | `linux/amd64` |
+            | User | `ubuntu` / uid 1000 (**adopt mode**) |
+            | Home | `/home/ubuntu` |
+            | Registry | `ghcr.io/opencharly` |
+            
+            ## User model — adopt from base image
+            
+            The embedded `distro.ubuntu` vocabulary inherits from `distro.debian` (same apt bootstrap template) and adds a `base_user:` block:
+            
+            ```yaml
+            distro:
+              ubuntu:
+                inherits: debian
+                base_user:
+                  name: ubuntu
+                  uid: 1000
+                  gid: 1000
+                  home: /home/ubuntu
+            ```
+            
+            Any downstream image with `user_policy: auto` (the default) that **did not** explicitly set its own `user:` field will adopt this — `resolved.User = "ubuntu"`, `resolved.Home = "/home/ubuntu"`, `resolved.UserAdopted = true`. The bootstrap emits **no** `useradd`; it emits a one-line comment documenting the adoption:
+            
+            ```
+            # User ubuntu (uid=1000) adopted from base image (declared in charly/charly.yml distro.base_user) — no useradd needed
+            WORKDIR /home/ubuntu
+            USER 1000
+            ```
+            
+            This architecture is **declarative** (what the base image ships) + **policy-driven** (how to reconcile with the image's configured user). Three policy values:
+            
+            | Policy | Behavior on this base |
+            |--------|----------------------|
+            | `auto` (default) | Adopt `ubuntu:ubuntu` — image inherits the upstream account. |
+            | `adopt` | Same as auto here; hard-errors on bases without `base_user:`. |
+            | `create` | Override — force-create a different uid-1000 account (fails if `useradd` collides). |
+            
+            See `/charly-image:image` "user_policy" and `/charly-build:build` "base_user" for the full table covering all four distros.
+            
+            ## Why adopt over rename?
+            
+            Adopt mode honors the existing `ubuntu` account rather than renaming it to `user` via `usermod -l`, because:
+            
+            1. Ubuntu's cloud-init tooling, docs, and `/etc/passwd` metadata assume the account is named `ubuntu`.
+            2. Renaming is an invisible base-image mutation — breaks in hard-to-debug ways.
+            3. The rename approach doesn't scale to Debian cloud images (or future distros) that ship their own pre-existing uid-1000 accounts with different names.
+            
+            Adopt mode respects the base image's contract and scales declaratively. See `/charly-coder:sshd` for the `getent passwd 1000` pattern that makes candy content (sudoers in particular) work uniformly across both create and adopt modes.
+            
+            ## Bootstrap
+            
+            ```dockerfile
+            FROM ubuntu:24.04
+            RUN --mount=type=cache,dst=/var/cache/apt,sharing=locked
+                --mount=type=cache,dst=/var/lib/apt,sharing=locked
+                apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg && \
+                ... install go-task binary ...
+            # User ubuntu (uid=1000) adopted from base image (declared in charly/charly.yml distro.base_user) — no useradd needed
+            WORKDIR /home/ubuntu
+            USER 1000
+            ```
+            
+            ## Dockerhub rate-limit caveat
+            
+            The upstream `ubuntu:24.04` pull from Dockerhub is unauthenticated-rate-limited (100 pulls / 6h / IP). If `charly box build ubuntu` fails with `toomanyrequests`, pull from AWS ECR Public and retag:
+            
+            ```bash
+            podman pull public.ecr.aws/docker/library/ubuntu:24.04
+            podman tag public.ecr.aws/docker/library/ubuntu:24.04 docker.io/library/ubuntu:24.04
+            charly box build ubuntu
+            ```
+            
+            ECR Public mirrors the Dockerhub library namespace without rate-limiting.
+            
+            ## Downstream / sibling entries (all in opencharly/distro-ubuntu)
+            
+            - `/charly-distros:ubuntu-builder` — pixi/npm/cargo multi-stage builder.
+            - `/charly-coder:ubuntu-coder` — kitchen-sink dev box.
+            - `/charly-distros:ubuntu-debootstrap-builder` — privileged debootstrap builder (`base: debian:13`).
+            - `/charly-distros:ubuntu-debootstrap` — bootstrap-from-scratch rootfs.
+            - `/charly-vm:ubuntu-debootstrap-vm` — the `ubuntu-debootstrap` bootstrap VM + `check-ubuntu-debootstrap-vm` bed.
+            
+            ## Verification
+            
+            ```bash
+            charly -C box/ubuntu box build ubuntu
+            charly shell ubuntu                       # drops into /home/ubuntu as uid 1000
+            id                                    # uid=1000(ubuntu) gid=1000(ubuntu)
+            charly -C box/ubuntu box validate     # the embedded build vocabulary resolves distro.ubuntu (inherits debian)
+            ```
+            
+            ## Related boxes
+            
+            - `/charly-distros:debian` — sibling deb-family base without adopt mode (Debian 13 ships no pre-existing uid-1000 user).
+            - `/charly-distros:ubuntu-builder` — multi-stage builder.
+            - `/charly-coder:ubuntu-coder` — kitchen-sink dev box.
+            - `/charly-distros:fedora` — RPM-family counterpart.
+            - `/charly-distros:arch` — pacman-family counterpart.
+            
+            ## Related commands
+            
+            - `/charly-build:build` — `base_user:` declaration format, which lives in the embedded `distro.ubuntu` vocabulary.
+            - `/charly-image:image` — `user_policy:` field + reconciliation.
+            - `/charly-build:generate` — adopt-vs-create writeBootstrap emission.
+            
+            ## Related candies (cross-distro patterns this base enables)
+            
+            - `/charly-coder:sshd` — `getent passwd 1000`-based sudoers works for both `user` (create) and `ubuntu` (adopt).
+            - `/charly-coder:language-runtimes` — Microsoft `dotnet-install.sh` (Ubuntu noble doesn't ship dotnet-sdk-9.0 in main; Microsoft's noble apt repo only has 10.0; the dotnet-install.sh `--channel 9.0` is the cross-distro solution).
+            
+            ## When to use this skill
+            
+            **MUST be invoked** when:
+            
+            - Building or troubleshooting the `ubuntu` base image.
+            - Adding any Ubuntu-based box (it will inherit the adopt-mode `ubuntu:ubuntu` identity by default).
+            - Debugging `${USER}` / `${HOME}` differences between Ubuntu and other deb-based boxes (ubuntu-coder → `ubuntu:/home/ubuntu`; debian-coder → `user:/home/user`).
+            - Understanding why ubuntu-coder's `/etc/sudoers.d/charly-user` says `ubuntu ALL=(ALL) NOPASSWD: ALL` rather than `user`.
+
