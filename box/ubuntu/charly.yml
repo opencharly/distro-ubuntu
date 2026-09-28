@@ -1,8 +1,5 @@
 ubuntu:
     candy:
-        # Bare distro base on ubuntu:24.04 (layerless) — carries a dedicated version:
-        # for content-stable identity (cache stability), per the per-kind versioning.
-        version: 2026.144.1443
         base: ubuntu:24.04
         build:
             - deb
