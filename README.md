@@ -1,44 +1,35 @@
-# opencharly/distro-ubuntu
+# distro-ubuntu
 
-The **Ubuntu image family** for [OpenCharly](https://github.com/opencharly/charly),
-split into its own repository and mounted as a git submodule at `box/ubuntu`
-of the main repo.
+The **Ubuntu image family** for [OpenCharly](https://github.com/opencharly/charly) —
+deb-family, on the upstream `ubuntu:24.04` base.
+
+This repo is mounted as a git submodule at `box/ubuntu` of the main repo. It
+contains **no candies of its own** and carries no build-config file: every candy
+is an `@github.com/opencharly/<layer-*|pod-*|plugin-*>[:subdir]:<tag>` ref into
+its standalone candy repo, and the distro/builder/init build vocabulary is
+embedded in the `charly` binary — `import:` is empty (`import: []`). Ubuntu is
+deb-family: `distro.ubuntu` is `inherits: debian`, and the embedded vocabulary
+carries both distro configs, so the inheritance resolves with no import.
 
 ## What's here
 
 | Kind | Entries |
 |---|---|
-| `image:` | `ubuntu` (base), `ubuntu-builder`, `ubuntu-coder`, `ubuntu-debootstrap`, `ubuntu-debootstrap-builder` |
-| `vm:` | `ubuntu-debootstrap` (bootstrap-from-scratch via debootstrap) |
-| `check:` | `check-ubuntu-debootstrap-vm` (disposable bootstrap-VM bed) |
+| Base / builder | `ubuntu` (base), `ubuntu-builder` (pixi/npm/cargo multi-stage builder) |
+| Images | `ubuntu-coder` (kitchen-sink dev box), `ubuntu-debootstrap-builder` (`base: debian:13`), `ubuntu-debootstrap` (`from: builder:debootstrap`) |
+| VM | `ubuntu-debootstrap` (bootstrap-from-scratch via `debootstrap`) |
+| Check bed | `check-ubuntu-debootstrap-vm` (disposable bootstrap-VM bed) |
 
-## Composition by reference — nothing is vendored
-
-This repo contains **no candies of its own** and carries no build-config file.
-Everything is pulled from `github.com/opencharly/charly` by **github reference**,
-and the shared build vocabulary is embedded in the `charly` binary:
-
-- every candy in `charly.yml` is an `@github.com/opencharly/<layer-*|pod-*|plugin-*>[:subdir]:<tag>` ref;
-- the distro/builder/init build vocabulary is **embedded in the `charly` binary**
-  (`charly/charly.yml`) — `import:` is empty (`import: []`). Ubuntu is deb-family:
-  `distro.ubuntu` is `inherits: debian`, and the embedded vocabulary carries BOTH
-  the `ubuntu` and `debian` distro configs, so the inheritance resolves with no
-  import. It also carries the `deb` format template and the `debootstrap` builder
-  template.
-
-The `ubuntu` base roots at the upstream docker.io `ubuntu:24.04` image directly
-(the `ubuntu-debootstrap-builder` is `base: debian:13`, since debootstrap is a
-Debian tool), so this repo needs **no remote base include**. All references pin
-to explicit CalVer tags, so a build is reproducible. There is
-exactly one definition of every layer — no duplication.
+The `ubuntu` base runs as uid-1000 `ubuntu` via **adopt mode** — the upstream
+`ubuntu:24.04` image ships a pre-existing `ubuntu:ubuntu` account, and the
+embedded `distro.ubuntu` vocabulary adopts it rather than creating a new user.
 
 ## No coupling with main
 
 Nothing in the main `opencharly` repo consumes any Ubuntu image (no
-`base: ubuntu` image stays in main), so there is **no main ↔ ubuntu coupling**:
-the only edge is `ubuntu → main` (this repo pulls candies via `@github` refs). Main
-pulls nothing back. The image DAG is acyclic
-(`ubuntu-coder → ubuntu → docker.io/ubuntu:24.04`;
+`base: ubuntu` image stays in main), so there is no main ↔ ubuntu coupling: the
+only edge is `ubuntu → main` (this repo pulls candies via `@github` refs). The
+image DAG is acyclic (`ubuntu-coder → ubuntu → docker.io/ubuntu:24.04`;
 `ubuntu-debootstrap → ubuntu-debootstrap-builder → docker.io/debian:13`).
 
 ## Build
@@ -63,15 +54,35 @@ The first build resolves the upstream github references into
 `ubuntu-debootstrap` builds an Ubuntu rootfs from scratch via `debootstrap`
 inside the privileged `ubuntu-debootstrap-builder` container (`from:
 builder:debootstrap`). `check-ubuntu-debootstrap-vm` boots that rootfs under
-libvirt/QEMU and carries `disposable: true`, so `charly -C box/ubuntu check run
-check-ubuntu-debootstrap-vm` rebuilds it unattended.
+libvirt/QEMU and carries `disposable: true`, so it rebuilds unattended:
+
+```bash
+charly -C box/ubuntu check run check-ubuntu-debootstrap-vm
+```
 
 ## Requirements
 
 A build of any image here fetches from the upstream repo, so it needs network
 access and a `charly` recent enough to understand the config's schema version
-(`charly` hard-fails with a "newer than this charly supports" message if the config
-schema is newer than the binary supports).
+(`charly` hard-fails with a "newer than this charly supports" message if the
+config schema is newer than the binary supports).
 
----
-*Assisted-by: Claude*
+## Layout
+
+- `charly.yml` — the root manifest: the `discover:` tree, the inline
+  `check-ubuntu-debootstrap-vm` bed, and the embedded `skill:` entities
+  (`ubuntu`, `ubuntu-builder`, `ubuntu-coder`, `ubuntu-debootstrap`,
+  `ubuntu-debootstrap-builder`).
+- `box/<name>/charly.yml` — one manifest per image / builder / VM box.
+- `.github/workflows/tag-on-merge.yml` — CalVer tag + `CHANGELOG/` on merge.
+- `README.md` — this user overview.
+
+## Related
+
+- Owning skills: `/charly-distros:ubuntu`, `/charly-distros:ubuntu-builder`,
+  `/charly-distros:ubuntu-debootstrap`,
+  `/charly-distros:ubuntu-debootstrap-builder`, `/charly-coder:ubuntu-coder`
+- Bootstrap VM: `/charly-vm:ubuntu-debootstrap-vm`
+- Sibling: `/charly-distros:debian` (deb-family, create mode)
+- [`opencharly/charly`](https://github.com/opencharly/charly) — the charly CLI and image builder
+- [`opencharly/opencharly`](https://github.com/opencharly/opencharly) — the umbrella
