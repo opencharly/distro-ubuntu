@@ -2,10 +2,13 @@ ubuntu-coder:
     candy:
         base: ubuntu
         candy:
-            # ONE SOURCE per layer (opencharly/charly#739, operator ruling): the composed
-            # meta-layers provide layer-charly (pod-charly-mcp), layer-direnv
-            # (layer-agent-forwarding), and layer-gemini + layer-google-cloud
-            # (layer-google-cloud-npm) — so those are NOT re-listed here.
+            # ONE SOURCE per layer (opencharly/charly#739, operator ruling): for this box the
+            # composed META-LAYER provides each removed layer, so the box keeps the POD and
+            # drops the redundant direct LAYERS — pod-charly-mcp composes layer-charly (bumped
+            # to v2026.272.0015 precisely so that composed layer stays the deterministic
+            # v2026.269.2324, not the old pod's v2026.241.1216), layer-agent-forwarding composes
+            # layer-direnv, and layer-google-cloud-npm composes layer-google-cloud +
+            # layer-gemini. Re-listing any of them pins one candy from two configs.
             - '@github.com/opencharly/layer-agent-forwarding:v2026.239.1607'
             - '@github.com/opencharly/pod-sshd:v2026.239.1637'
             - '@github.com/opencharly/pod-charly-mcp:v2026.272.0015'
