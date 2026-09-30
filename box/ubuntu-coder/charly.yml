@@ -10,8 +10,6 @@ ubuntu-coder:
             - '@github.com/opencharly/layer-tmux:v2026.240.0202'
             - '@github.com/opencharly/layer-language-runtimes:v2026.272.0320'
             - '@github.com/opencharly/layer-golang:v2026.239.1614'
-            - '@github.com/opencharly/layer-nodejs:v2026.239.1624'
-            - '@github.com/opencharly/layer-rust:v2026.239.1627'
             - '@github.com/opencharly/layer-pixi:v2026.239.1634'
             - '@github.com/opencharly/layer-uv:v2026.239.1631'
             - '@github.com/opencharly/layer-build-toolchain:v2026.239.1636'
