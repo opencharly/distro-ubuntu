@@ -761,6 +761,11 @@ check-githubrunner-ubuntu-vm:
                 trap - EXIT
                 sudo rm -rf /tmp/probe-runner
                 printf 'PRESSURE-PURGE-OK\n'
+# Disposable R10 test bed for the ubuntu bootstrap VM (kind:check — the
+# 2026-05 deploy→check unification moved repo-shipped disposable beds out of
+# deploy.yml). disposable: true is the sole authorization for the unattended
+# destroy+rebuild driven by `charly check run check-ubuntu-debootstrap-vm`.
+
 check-ubuntu-debootstrap-vm:
     vm:
         from: ubuntu-debootstrap
