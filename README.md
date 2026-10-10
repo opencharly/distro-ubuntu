@@ -17,8 +17,8 @@ carries both distro configs, so the inheritance resolves with no import.
 |---|---|
 | Base / builder | `ubuntu` (base), `ubuntu-builder` (pixi/npm/cargo multi-stage builder) |
 | Images | `ubuntu-coder` (kitchen-sink dev box), `ubuntu-debootstrap-builder` (`base: debian:13`), `ubuntu-debootstrap` (`from: builder:debootstrap`) |
-| VM | `ubuntu-debootstrap` (bootstrap-from-scratch via `debootstrap`) |
-| Check bed | `check-ubuntu-debootstrap-vm` (disposable bootstrap-VM bed) |
+| VM | `ubuntu-debootstrap` (bootstrap-from-scratch via `debootstrap`), `githubrunner-ubuntu` (co-tenant-safe CI-runner VM for the org's self-hosted fleet) |
+| Check bed | `check-ubuntu-debootstrap-vm` (disposable bootstrap-VM bed), `check-githubrunner-ubuntu-vm` (CI-runner VM R10 bed) |
 
 The `ubuntu` base runs as uid-1000 `ubuntu` via **adopt mode** — the upstream
 `ubuntu:24.04` image ships a pre-existing `ubuntu:ubuntu` account, and the
@@ -59,6 +59,32 @@ libvirt/QEMU and carries `disposable: true`, so it rebuilds unattended:
 ```bash
 charly -C box/ubuntu check run check-ubuntu-debootstrap-vm
 ```
+
+## CI runners (`githubrunner-ubuntu` / `check-githubrunner-ubuntu-vm`)
+
+The Ubuntu half of the org's self-hosted CI fleet: a `kind: vm` entity (cloud_image noble,
+UEFI-insecure, q35, 128 GiB / 32 GiB / 16 vCPU) that four GitHub Actions runner instances
+share. It exists because the Blacksmith-shaped CI of `opencharly/openclaw-enterprise` needs a
+rootful Docker daemon, privileged k3s node containers, systemd and apt + passwordless sudo —
+none of which a rootless pod provides.
+
+Those workflows assume **one job per machine**, so the recipe carries the co-tenancy fixes
+each measured failure demanded: Docker pinned to `29.4.0` (the version the CI asserts), the
+daemon on its own unit and socket so a lane's `systemctl stop docker.service` is a no-op for
+its co-tenants, `/var/run/docker.sock` kept as a symlink for the lanes that hardcode or mount
+it, per-runner `DOCKER_HOST`, a timer that repairs a dangling socket, a store GC that collects
+the buildkit builders cancelled lanes leak (13 of them held 84 GB and filled the disk),
+a capped journal, and unprivileged user namespaces enabled for bwrap-sandboxed lanes.
+
+```bash
+# The R10 gate (disposable VM, no secret, registers no runner):
+charly check run check-githubrunner-ubuntu-vm
+```
+
+Registration is a token-guarded operator step — the runner tree and the exact label sets are
+provisioned, the `config.sh` run is not. Details: the `githubrunner-ubuntu` skill and the
+header of the entity in `charly.yml`. The CachyOS half of the fleet (rootless
+`box/githubrunner` pods and their bed) lives in `opencharly/distro-cachyos`.
 
 ## Requirements
 
