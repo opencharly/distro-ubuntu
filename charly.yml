@@ -277,7 +277,8 @@ githubrunner-ubuntu:
                     MIN_AGE=${CHARLY_GC_MIN_AGE:-20m}
                     PRESSURE_AGE=${CHARLY_GC_PRESSURE_AGE:-70m}
                     PRESSURE_PCT=${CHARLY_GC_PRESSURE_PCT:-80}
-                    jobs=$(pgrep -xc Runner.Worker 2>/dev/null || echo 0)
+                    jobs=$(pgrep -xc Runner.Worker 2>/dev/null || true)
+                    jobs=${jobs:-0}
                     use=$(df --output=pcent / | tail -1 | tr -dc '0-9')
 
                     # 2. builders whose endpoint socket is gone: their job is gone by construction
@@ -714,7 +715,7 @@ check-githubrunner-ubuntu-vm:
                 # strays from an earlier step must not masquerade as an active job
                 sudo pkill -f '/tmp/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
                 sleep 1
-                test "$(pgrep -xc Runner.Worker 2>/dev/null || echo 0)" = 0
+                test "$(pgrep -xc Runner.Worker 2>/dev/null || true)" = 0
                 # idempotent: this step runs at deploy-add AND at check-live
                 docker rm -f probe-leftover >/dev/null 2>&1 || true
                 docker volume rm probe-leftover >/dev/null 2>&1 || true
