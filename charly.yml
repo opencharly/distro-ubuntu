@@ -272,7 +272,8 @@ githubrunner-ubuntu:
                     # merely mentions the string (a lane grepping for it, or this very check), inflating
                     # the count and making the surplus rule keep leaks.
                     # Thresholds are overridable so the bed can drive each purge branch deterministically
-                    # (defaults are the production values).
+                    # (defaults are the production values; 0 disables the age floor and skips the filter,
+                    # because docker rejects a zero `until=`).
                     MIN_AGE=${CHARLY_GC_MIN_AGE:-20m}
                     PRESSURE_AGE=${CHARLY_GC_PRESSURE_AGE:-70m}
                     PRESSURE_PCT=${CHARLY_GC_PRESSURE_PCT:-80}
@@ -315,9 +316,9 @@ githubrunner-ubuntu:
                       if [ "$jobs" -eq 0 ]; then
                         # age grace: a job that started between the job-count probe above and this purge
                         # would otherwise lose its containers, so nothing younger than 20 minutes is touched
-                        ids=$(D ps -aq --filter "until=$MIN_AGE")
+                        case "$MIN_AGE" in 0|0m|0s) ids=$(D ps -aq);; *) ids=$(D ps -aq --filter "until=$MIN_AGE");; esac
                       else
-                        ids=$(D ps -aq --filter "until=$PRESSURE_AGE")
+                        case "$PRESSURE_AGE" in 0|0m|0s) ids=$(D ps -aq);; *) ids=$(D ps -aq --filter "until=$PRESSURE_AGE");; esac
                       fi
                       [ -n "$ids" ] && D rm -f $ids >/dev/null 2>&1
                       rm -f "$BX/current" 2>/dev/null
@@ -678,13 +679,10 @@ check-githubrunner-ubuntu-vm:
                 - runtime
               command: |
                 set -eu
-                python3 - <<'PY'
-                import json
-                p = "/home/ubuntu/.docker/config.json"
-                d = json.load(open(p))
-                d["currentContext"] = "setup-docker-action"
-                json.dump(d, open(p, "w"), indent="\t")
-                PY
+                # a fresh guest has no ~/.docker/config.json (docker writes it lazily), so
+                # create it with the rot a dead lane leaves: a context that does not exist
+                sudo -u ubuntu mkdir -p /home/ubuntu/.docker
+                sudo -u ubuntu sh -c 'printf "{\n\t\\"auths\\": {},\n\t\\"currentContext\\": \\"setup-docker-action\\"\n}\n" > /home/ubuntu/.docker/config.json'
                 sudo mkdir -p /home/ubuntu/.docker/buildx
                 printf '{"Key":"unix:///run/docker-ci.sock","Name":"builder-deadbeef-0000-0000-0000-000000000000","Global":false}' \
                   | sudo tee /home/ubuntu/.docker/buildx/current >/dev/null
@@ -712,10 +710,13 @@ check-githubrunner-ubuntu-vm:
               command: |
                 set -eu
                 test "$(pgrep -xc Runner.Worker 2>/dev/null || echo 0)" = 0
+                # idempotent: this step runs at deploy-add AND at check-live
+                docker rm -f probe-leftover >/dev/null 2>&1 || true
+                docker volume rm probe-leftover >/dev/null 2>&1 || true
                 docker pull -q alpine >/dev/null
                 docker volume create probe-leftover >/dev/null
                 docker run -d --name probe-leftover -v probe-leftover:/x alpine sleep 600 >/dev/null
-                sudo env CHARLY_GC_MIN_AGE=0m /usr/local/sbin/charly-docker-store-gc
+                sudo env CHARLY_GC_MIN_AGE=0 /usr/local/sbin/charly-docker-store-gc
                 test -z "$(docker ps -aq)"
                 if docker volume inspect probe-leftover >/dev/null 2>&1; then echo "volume survived the idle purge" >&2; exit 1; fi
                 printf 'IDLE-PURGE-OK\n'
@@ -736,6 +737,7 @@ check-githubrunner-ubuntu-vm:
               command: |
                 set -eu
                 for c in probe-pressure buildx_buildkit_probe-runner0; do docker rm -f "$c" >/dev/null 2>&1 || true; done
+                docker volume rm probe-pressure >/dev/null 2>&1 || true
                 sudo install -d -o ubuntu -m 0755 /tmp/probe-runner
                 sudo cp /bin/sleep /tmp/probe-runner/Runner.Worker
                 /tmp/probe-runner/Runner.Worker 300 &
@@ -745,7 +747,7 @@ check-githubrunner-ubuntu-vm:
                 docker pull -q alpine >/dev/null
                 docker volume create probe-pressure >/dev/null
                 docker run -d --name probe-pressure -v probe-pressure:/x alpine sleep 600 >/dev/null
-                sudo env CHARLY_GC_PRESSURE_PCT=0 CHARLY_GC_PRESSURE_AGE=0m /usr/local/sbin/charly-docker-store-gc
+                sudo env CHARLY_GC_PRESSURE_PCT=0 CHARLY_GC_PRESSURE_AGE=0 /usr/local/sbin/charly-docker-store-gc
                 if docker ps -aq --filter name=probe-pressure | grep -q .; then echo "stale leftover survived the pressure purge" >&2; exit 1; fi
                 test "$(pgrep -xc Runner.Worker)" = 1
                 kill "$fake" 2>/dev/null || true
