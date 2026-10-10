@@ -240,10 +240,9 @@ githubrunner-ubuntu:
                     # buildx state (instances/, activity/, current) lives in the RUNNER USER's home, so
                     # every buildx verb must run as that user or it reads root's empty state.
                     DB() { sudo -u ubuntu docker --host "$HOST" "$@"; }
-                    # EVERY builder buildx knows about, except the built-in `default`
-                    # docker-driver one: keying on the name shape `builder-<hex>` that
-                    # setup-buildx-action generates missed every builder a lane created
-                    # under any other name (measured in this bed's own fixture).
+                    # EVERY builder buildx knows about, except the built-in `default` docker-driver one:
+                    # keying on the name shape `builder-<hex>` that setup-buildx-action generates missed
+                    # every builder a lane created under any other name (measured in the R10 bed).
                     builder_names() {
                       DB buildx ls 2>/dev/null | awk '{print $1}' | grep -vE '^(NAME/NODE|\\_|$)' | sed 's/\*$//' | grep -vx default
                     }
@@ -269,6 +268,14 @@ githubrunner-ubuntu:
                       fi
                     fi
 
+                    # count by process NAME: `pgrep -f` would also match any shell whose command line
+                    # merely mentions the string (a lane grepping for it, or this very check), inflating
+                    # the count and making the surplus rule keep leaks.
+                    # Thresholds are overridable so the bed can drive each purge branch deterministically
+                    # (defaults are the production values).
+                    MIN_AGE=${CHARLY_GC_MIN_AGE:-20m}
+                    PRESSURE_AGE=${CHARLY_GC_PRESSURE_AGE:-70m}
+                    PRESSURE_PCT=${CHARLY_GC_PRESSURE_PCT:-80}
                     jobs=$(pgrep -xc Runner.Worker 2>/dev/null || echo 0)
                     use=$(df --output=pcent / | tail -1 | tr -dc '0-9')
 
@@ -304,13 +311,13 @@ githubrunner-ubuntu:
                     D builder prune -af --filter until=2h >/dev/null 2>&1
 
                     # 5. idle or under disk pressure: collect everything the finished lanes left
-                    if [ "$jobs" -eq 0 ] || [ "$use" -gt 80 ]; then
+                    if [ "$jobs" -eq 0 ] || [ "$use" -gt "$PRESSURE_PCT" ]; then
                       if [ "$jobs" -eq 0 ]; then
-                        # age grace: a job that started between the job-count probe above and this
-                        # purge would otherwise lose its containers, so nothing younger than 20 min is touched.
-                        ids=$(D ps -aq --filter until=20m)
+                        # age grace: a job that started between the job-count probe above and this purge
+                        # would otherwise lose its containers, so nothing younger than 20 minutes is touched
+                        ids=$(D ps -aq --filter "until=$MIN_AGE")
                       else
-                        ids=$(D ps -aq --filter until=70m)
+                        ids=$(D ps -aq --filter "until=$PRESSURE_AGE")
                       fi
                       [ -n "$ids" ] && D rm -f $ids >/dev/null 2>&1
                       rm -f "$BX/current" 2>/dev/null
@@ -441,27 +448,7 @@ check-githubrunner-ubuntu-vm:
             for the token-guarded registration. Nothing here registers a runner or needs
             a secret.
         plan:
-            - check: |
-                set -eu
-                # `cloud-init status` alone is NOT a gate: for a few seconds after boot it
-                # still reports the previous boot's result, so wait for the run to finish
-                # AND for the recipe's artifacts to converge, bounded.
-                timeout 300 cloud-init status --wait >/dev/null 2>&1 || true
-                i=0
-                while [ "$i" -lt 60 ]; do
-                  if systemctl is-active --quiet docker-ci.service &&
-                     systemctl is-active --quiet charly-docker-store-gc.timer &&
-                     systemctl is-active --quiet charly-docker-sock-heal.timer &&
-                     swapon --show=NAME | grep -q '^/swapfile$' &&
-                     test -x /home/ubuntu/actions-runner-base/config.sh; then
-                    printf 'CLOUD-INIT-COMPLETE-OK\n'
-                    exit 0
-                  fi
-                  i=$((i + 1))
-                  sleep 10
-                done
-                echo "the recipe did not converge within 600s: $(cloud-init status --long 2>&1 | tail -3)" >&2
-                exit 1
+            - check: the guest has finished first boot and the recipe's artifacts have converged
               id: cloud-init-complete
               description: |
                 The guest has finished its first-boot cloud-init before anything else is
@@ -506,10 +493,7 @@ check-githubrunner-ubuntu-vm:
               context:
                 - runtime
               command: docker version --format '{{.Server.Version}}'
-            - check: |
-                test "$(systemctl is-active docker-ci.service)" = active &&
-                test "$(systemctl is-active docker.service)" = inactive &&
-                printf 'DAEMON-SPLIT-OK\n'
+            - check: the CI daemon is docker-ci.service on its own socket, with the stock unit inactive
               id: daemon-unit-split
               description: |
                 The daemon the lanes use is docker-ci.service, and the stock docker.service
@@ -526,11 +510,7 @@ check-githubrunner-ubuntu-vm:
                 test "$(systemctl is-active docker-ci.service)" = active &&
                 test "$(systemctl is-active docker.service)" = inactive &&
                 printf 'DAEMON-SPLIT-OK\n'
-            - check: |
-                test "$(readlink /var/run/docker.sock)" = /run/docker-ci.sock &&
-                DOCKER_HOST=unix:///run/docker-ci.sock docker version --format '{{.Server.Version}}' >/dev/null &&
-                test "$(grep -l 'DOCKER_HOST=unix:///run/docker-ci.sock' /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-*.service.d/docker-host.conf | wc -l)" = 4 &&
-                printf 'SOCKET-AND-DOCKER-HOST-OK\n'
+            - check: the shared socket path resolves to that daemon and every runner sets DOCKER_HOST to it
               id: socket-and-per-runner-docker-host
               description: |
                 The shared socket path lanes hardcode or mount resolves to the co-tenant-safe
@@ -548,14 +528,7 @@ check-githubrunner-ubuntu-vm:
                 DOCKER_HOST=unix:///run/docker-ci.sock docker version --format '{{.Server.Version}}' >/dev/null &&
                 test "$(grep -l 'DOCKER_HOST=unix:///run/docker-ci.sock' /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-*.service.d/docker-host.conf | wc -l)" = 4 &&
                 printf 'SOCKET-AND-DOCKER-HOST-OK\n'
-            - check: |
-                set -eu
-                sudo systemctl stop docker.service docker.socket || true
-                sudo ln -sfn /tmp/not-a-socket.sock /var/run/docker.sock
-                DOCKER_HOST=unix:///run/docker-ci.sock docker version --format '{{.Server.Version}}' >/dev/null
-                sudo /usr/local/sbin/charly-docker-sock-heal
-                test "$(readlink /var/run/docker.sock)" = /run/docker-ci.sock
-                printf 'COTENANT-ISOLATION-OK\n'
+            - check: a co-tenant keeps a live daemon through DOCKER_HOST while a lane mutates the shared socket
               id: cotenant-isolation-under-lane-mutation
               description: |
                 The mechanism, executed: reproduce exactly what logging-collector's
@@ -578,35 +551,7 @@ check-githubrunner-ubuntu-vm:
                 sudo /usr/local/sbin/charly-docker-sock-heal
                 test "$(readlink /var/run/docker.sock)" = /run/docker-ci.sock
                 printf 'COTENANT-ISOLATION-OK\n'
-            - check: |
-                set -eu
-                # idempotent: a bed's check step runs at deploy-add AND at check-live
-                for b in probe-keep probe-leak; do
-                  sudo -u ubuntu docker buildx rm --force "$b" >/dev/null 2>&1 || true
-                  sudo -u ubuntu docker rm -f "buildx_buildkit_${b}0" >/dev/null 2>&1 || true
-                done
-                # fixture: a process really NAMED Runner.Worker (the GC counts by name, so
-                # `exec -a` is not enough), representing one active CI job that owns one of
-                # the two builders below
-                sudo install -d -o ubuntu -m 0755 /tmp/probe-runner
-                sudo cp /bin/sleep /tmp/probe-runner/Runner.Worker
-                /tmp/probe-runner/Runner.Worker 300 &
-                fake=$!
-                trap 'kill $fake 2>/dev/null || true; sudo rm -rf /tmp/probe-runner' EXIT
-                test "$(pgrep -xc Runner.Worker)" = 1
-                sudo -u ubuntu docker buildx create --name probe-keep --driver docker-container >/dev/null
-                sleep 2
-                sudo -u ubuntu docker buildx create --name probe-leak --driver docker-container >/dev/null
-                touch -d '2 hours ago' /home/ubuntu/.docker/buildx/activity/probe-leak
-                sudo /usr/local/sbin/charly-docker-store-gc
-                test "$(pgrep -xc Runner.Worker)" = 1
-                sudo -u ubuntu docker buildx ls | grep -q probe-leak && { echo "leaked builder survived a running-job GC" >&2; exit 1; }
-                sudo -u ubuntu docker buildx ls | grep -q probe-keep || { echo "the active job's builder was collected" >&2; exit 1; }
-                sudo -u ubuntu docker buildx rm --force probe-keep >/dev/null 2>&1 || true
-                sudo -u ubuntu docker rm -f buildx_buildkit_probe-keep0 >/dev/null 2>&1 || true
-                kill "$fake" 2>/dev/null || true
-                trap - EXIT
-                printf 'STORE-GC-COLLECTS-LEAK-WHILE-RUNNING-OK\n'
+            - check: the store GC drops the leaked builder and keeps the running job's
               id: store-gc-collects-leaked-builder
               description: |
                 A builder leaked by a dead lane is collected WHILE another lane is running —
@@ -649,10 +594,7 @@ check-githubrunner-ubuntu-vm:
                 kill "$fake" 2>/dev/null || true
                 trap - EXIT
                 printf 'STORE-GC-COLLECTS-LEAK-WHILE-RUNNING-OK\n'
-            - check: |
-                unshare --user --map-root-user true &&
-                test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 0 &&
-                printf 'UNPRIVILEGED-USERNS-OK\n'
+            - check: unprivileged user namespaces work, so bwrap-sandboxed lanes can run
               id: unprivileged-user-namespaces
               description: |
                 Unprivileged user namespaces work in the guest, and the AppArmor restriction
@@ -671,11 +613,7 @@ check-githubrunner-ubuntu-vm:
                 unshare --user --map-root-user true &&
                 test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 0 &&
                 printf 'UNPRIVILEGED-USERNS-OK\n'
-            - check: |
-                test -x /home/ubuntu/actions-runner-base/config.sh &&
-                test "$(cat /etc/charly-runner-labels)" = 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vcpu-ubuntu-2404,blacksmith-32vcpu-ubuntu-2404' &&
-                test "$(cat /etc/charly-runner-labels-org)" = opencharly &&
-                printf 'RUNNER-TREE-AND-LABELS-OK\n'
+            - check: the runner tree and both exact label sets are in place for token-guarded registration
               id: runner-tree-and-labels-ready
               description: |
                 The runner tree the token-guarded registration copies, plus the exact label
@@ -693,19 +631,7 @@ check-githubrunner-ubuntu-vm:
                 test "$(cat /etc/charly-runner-labels)" = 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vcpu-ubuntu-2404,blacksmith-32vcpu-ubuntu-2404' &&
                 test "$(cat /etc/charly-runner-labels-org)" = opencharly &&
                 printf 'RUNNER-TREE-AND-LABELS-OK\n'
-            - check: |
-                ok=1
-                systemctl is-active --quiet charly-docker-store-gc.timer ||
-                  { echo "charly-docker-store-gc.timer=$(systemctl is-active charly-docker-store-gc.timer)"; ok=0; }
-                systemctl is-active --quiet charly-docker-sock-heal.timer ||
-                  { echo "charly-docker-sock-heal.timer=$(systemctl is-active charly-docker-sock-heal.timer)"; ok=0; }
-                grep -q 'SystemMaxUse=200M' /etc/systemd/journald.conf.d/charly-ci.conf ||
-                  { echo "journald cap missing"; ok=0; }
-                test "$(df -BG --output=size / | tail -1 | tr -dc '0-9')" -ge 120 ||
-                  { echo "root filesystem size=$(df -BG --output=size / | tail -1)"; ok=0; }
-                swapon --show=NAME | grep -q '^/swapfile$' ||
-                  { echo "swap=$(swapon --show=NAME | tr '\n' ' ')"; ok=0; }
-                test "$ok" = 1 && printf 'RESOURCES-AND-TIMERS-OK\n'
+            - check: both hygiene timers are active, the journal is capped, the disk is the 128 GiB one and swap is on
               id: resources-and-timers
               description: |
                 The hygiene timers and the sizing that live measurement dictated are in place:
@@ -736,6 +662,96 @@ check-githubrunner-ubuntu-vm:
                   test "$ok" = 1 && printf 'RESOURCES-AND-TIMERS-OK\n'
 
 
+            - check: the stale docker context and buildx selection a dead lane leaves behind are repaired
+              id: stale-cli-state-repaired
+              description: |
+                A lane that ran the CI's setup-test-docker leaves the runner user's docker context
+                and buildx selection pointing at its own deleted job directory; every later docker
+                CLI call that does not set DOCKER_HOST then dies with "context ... not found", which
+                is what blocked the cleanup that would have prevented the 84 GB disk fill on
+                2026-10-10. The step plants exactly that rot and asserts the GC repairs it AND that
+                a plain `docker version` works again — the user-visible failure, not the file bytes.
+              stdout:
+                - contains: STALE-CLI-STATE-REPAIRED-OK
+              exit_status: 0
+              context:
+                - runtime
+              command: |
+                set -eu
+                python3 - <<'PY'
+                import json
+                p = "/home/ubuntu/.docker/config.json"
+                d = json.load(open(p))
+                d["currentContext"] = "setup-docker-action"
+                json.dump(d, open(p, "w"), indent="\t")
+                PY
+                sudo mkdir -p /home/ubuntu/.docker/buildx
+                printf '{"Key":"unix:///run/docker-ci.sock","Name":"builder-deadbeef-0000-0000-0000-000000000000","Global":false}' \
+                  | sudo tee /home/ubuntu/.docker/buildx/current >/dev/null
+                sudo chown ubuntu:ubuntu /home/ubuntu/.docker/buildx/current
+                if docker version >/dev/null 2>&1; then echo "the planted rot is not rot" >&2; exit 1; fi
+                sudo /usr/local/sbin/charly-docker-store-gc
+                python3 -c 'import json;d=json.load(open("/home/ubuntu/.docker/config.json"));assert d["currentContext"]=="default", d'
+                test ! -f /home/ubuntu/.docker/buildx/current
+                docker version >/dev/null 2>&1
+                printf 'STALE-CLI-STATE-REPAIRED-OK\n'
+            - check: with no CI job running the GC collects what a finished lane left behind
+              id: idle-purge-collects-leftover
+              description: |
+                The idle branch (script step 5) is what collects the containers and volumes of lanes
+                that died without cleaning up. It keeps an age grace so a job starting mid-purge
+                cannot lose its containers, so the step drives it by setting the grace to zero —
+                without that override the branch is untestable in a bed, and a regression in it
+                would pass the gate.
+              stdout:
+                - contains: IDLE-PURGE-OK
+              exit_status: 0
+              timeout: 600s
+              context:
+                - runtime
+              command: |
+                set -eu
+                test "$(pgrep -xc Runner.Worker 2>/dev/null || echo 0)" = 0
+                docker pull -q alpine >/dev/null
+                docker volume create probe-leftover >/dev/null
+                docker run -d --name probe-leftover -v probe-leftover:/x alpine sleep 600 >/dev/null
+                sudo env CHARLY_GC_MIN_AGE=0m /usr/local/sbin/charly-docker-store-gc
+                test -z "$(docker ps -aq)"
+                if docker volume inspect probe-leftover >/dev/null 2>&1; then echo "volume survived the idle purge" >&2; exit 1; fi
+                printf 'IDLE-PURGE-OK\n'
+            - check: the disk-pressure branch collects a stale leftover while a CI job is running
+              id: pressure-purge-while-running
+              description: |
+                The pressure branch is the safety valve for a run that fills the disk while lanes are
+                active: it may only touch containers older than the longest lane, so an in-flight job
+                keeps its own. The step runs a process really named Runner.Worker (so the GC sees one
+                active job) with the pressure percentage and that age floor driven to zero, and
+                asserts the stale leftover goes while the job's own process survives.
+              stdout:
+                - contains: PRESSURE-PURGE-OK
+              exit_status: 0
+              timeout: 600s
+              context:
+                - runtime
+              command: |
+                set -eu
+                for c in probe-pressure buildx_buildkit_probe-runner0; do docker rm -f "$c" >/dev/null 2>&1 || true; done
+                sudo install -d -o ubuntu -m 0755 /tmp/probe-runner
+                sudo cp /bin/sleep /tmp/probe-runner/Runner.Worker
+                /tmp/probe-runner/Runner.Worker 300 &
+                fake=$!
+                trap 'kill $fake 2>/dev/null || true; sudo rm -rf /tmp/probe-runner' EXIT
+                test "$(pgrep -xc Runner.Worker)" = 1
+                docker pull -q alpine >/dev/null
+                docker volume create probe-pressure >/dev/null
+                docker run -d --name probe-pressure -v probe-pressure:/x alpine sleep 600 >/dev/null
+                sudo env CHARLY_GC_PRESSURE_PCT=0 CHARLY_GC_PRESSURE_AGE=0m /usr/local/sbin/charly-docker-store-gc
+                if docker ps -aq --filter name=probe-pressure | grep -q .; then echo "stale leftover survived the pressure purge" >&2; exit 1; fi
+                test "$(pgrep -xc Runner.Worker)" = 1
+                kill "$fake" 2>/dev/null || true
+                trap - EXIT
+                sudo rm -rf /tmp/probe-runner
+                printf 'PRESSURE-PURGE-OK\n'
 check-ubuntu-debootstrap-vm:
     vm:
         from: ubuntu-debootstrap
