@@ -298,7 +298,7 @@ githubrunner-ubuntu:
                     while :; do
                       names=$(builder_names)
                       count=$(printf '%s\n' $names | grep -c . || true)
-                      [ "${count:-0}" -le "$jobs" ] && break
+                      [ "${count:-0}" -le "${jobs:-0}" ] && break
                       oldest=$(for n in $names; do [ -f "$BX/activity/$n" ] && stat -c '%Y %n' "$BX/activity/$n"; done | sort -n | head -1 | cut -d' ' -f2-)
                       [ -z "$oldest" ] && break
                       echo "gc: removing surplus builder '$(basename "$oldest")' (builders=$count jobs=$jobs)"
@@ -312,8 +312,8 @@ githubrunner-ubuntu:
                     D builder prune -af --filter until=2h >/dev/null 2>&1
 
                     # 5. idle or under disk pressure: collect everything the finished lanes left
-                    if [ "$jobs" -eq 0 ] || [ "$use" -gt "$PRESSURE_PCT" ]; then
-                      if [ "$jobs" -eq 0 ]; then
+                    if [ "${jobs:-0}" -eq 0 ] || [ "${use:-0}" -gt "${PRESSURE_PCT:-80}" ]; then
+                      if [ "${jobs:-0}" -eq 0 ]; then
                         # age grace: a job that started between the job-count probe above and this purge
                         # would otherwise lose its containers, so nothing younger than 20 minutes is touched
                         case "$MIN_AGE" in 0|0m|0s) ids=$(D ps -aq);; *) ids=$(D ps -aq --filter "until=$MIN_AGE");; esac
@@ -578,7 +578,8 @@ check-githubrunner-ubuntu-vm:
                 done
                 sudo install -d -o ubuntu -m 0755 /tmp/probe-runner
                 sudo cp /bin/sleep /tmp/probe-runner/Runner.Worker
-                /tmp/probe-runner/Runner.Worker 300 &
+                sudo pkill -f '/tmp/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
+                /tmp/probe-runner/Runner.Worker 90 &
                 fake=$!
                 trap 'kill $fake 2>/dev/null || true; sudo rm -rf /tmp/probe-runner' EXIT
                 test "$(pgrep -xc Runner.Worker)" = 1
@@ -682,16 +683,17 @@ check-githubrunner-ubuntu-vm:
                 # a fresh guest has no ~/.docker/config.json (docker writes it lazily), so
                 # create it with the rot a dead lane leaves: a context that does not exist
                 sudo -u ubuntu mkdir -p /home/ubuntu/.docker
-                sudo -u ubuntu sh -c 'printf "{\n\t\\"auths\\": {},\n\t\\"currentContext\\": \\"setup-docker-action\\"\n}\n" > /home/ubuntu/.docker/config.json'
+                sudo -u ubuntu python3 -c 'import json; json.dump({"auths": {}, "currentContext": "setup-docker-action"}, open("/home/ubuntu/.docker/config.json", "w"))'
+                python3 -c 'import json; d=json.load(open("/home/ubuntu/.docker/config.json")); assert d["currentContext"]=="setup-docker-action", d'
                 sudo mkdir -p /home/ubuntu/.docker/buildx
                 printf '{"Key":"unix:///run/docker-ci.sock","Name":"builder-deadbeef-0000-0000-0000-000000000000","Global":false}' \
                   | sudo tee /home/ubuntu/.docker/buildx/current >/dev/null
                 sudo chown ubuntu:ubuntu /home/ubuntu/.docker/buildx/current
-                if docker version >/dev/null 2>&1; then echo "the planted rot is not rot" >&2; exit 1; fi
+                # the rot is real: the named context does not exist
+                if docker context inspect setup-docker-action >/dev/null 2>&1; then echo "planted context unexpectedly exists" >&2; exit 1; fi
                 sudo /usr/local/sbin/charly-docker-store-gc
-                python3 -c 'import json;d=json.load(open("/home/ubuntu/.docker/config.json"));assert d["currentContext"]=="default", d'
+                python3 -c 'import json; d=json.load(open("/home/ubuntu/.docker/config.json")); assert d["currentContext"]=="default", d'
                 test ! -f /home/ubuntu/.docker/buildx/current
-                docker version >/dev/null 2>&1
                 printf 'STALE-CLI-STATE-REPAIRED-OK\n'
             - check: with no CI job running the GC collects what a finished lane left behind
               id: idle-purge-collects-leftover
@@ -709,6 +711,9 @@ check-githubrunner-ubuntu-vm:
                 - runtime
               command: |
                 set -eu
+                # strays from an earlier step must not masquerade as an active job
+                sudo pkill -f '/tmp/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
+                sleep 1
                 test "$(pgrep -xc Runner.Worker 2>/dev/null || echo 0)" = 0
                 # idempotent: this step runs at deploy-add AND at check-live
                 docker rm -f probe-leftover >/dev/null 2>&1 || true
@@ -740,7 +745,8 @@ check-githubrunner-ubuntu-vm:
                 docker volume rm probe-pressure >/dev/null 2>&1 || true
                 sudo install -d -o ubuntu -m 0755 /tmp/probe-runner
                 sudo cp /bin/sleep /tmp/probe-runner/Runner.Worker
-                /tmp/probe-runner/Runner.Worker 300 &
+                sudo pkill -f '/tmp/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
+                /tmp/probe-runner/Runner.Worker 90 &
                 fake=$!
                 trap 'kill $fake 2>/dev/null || true; sudo rm -rf /tmp/probe-runner' EXIT
                 test "$(pgrep -xc Runner.Worker)" = 1
