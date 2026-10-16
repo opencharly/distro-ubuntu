@@ -1,0 +1,5 @@
+[Unit]
+Description=Collect leaked CI docker builders/volumes and repair stale CLI state
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/charly-docker-store-gc
