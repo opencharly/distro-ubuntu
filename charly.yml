@@ -73,6 +73,52 @@ import: []
 #   * 128 GiB disk / 32 GiB RAM / 16 vCPU / 8 GiB swapfile: sized from live measurements
 #     of four concurrent lanes (peak ~12 GiB on the 15 GiB original, 44 GiB of docker
 #     state on the 61 GiB original).
+# The external cluster this recipe's KubeVirt substrate deploys onto. ONE place holds the
+# cluster-specific knobs, so the entity below names a profile instead of hardcoding a venue.
+# The boot disk for the KubeVirt form. A data_volume+http source CANNOT work on quant-dev: the CDI
+# importer there cannot open its block device (`blockdev: cannot open /dev/cdi-block-volume:
+# Permission denied`, measured), so deploy-add times out waiting on a DataVolume that never becomes
+# ready. A container_disk fed by a disk CHARLY builds and pushes is the arm this cluster supports, and
+# it is also the one that keeps the whole configuration charly.yml-only.
+githubrunner-ubuntu-disk:
+    vm:
+        source:
+            kind: cloud_image
+            distro: ubuntu
+            url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+            base_user: ubuntu
+        disk_size: 128G
+        ram: 4G
+        cpu: 2
+        machine: q35
+        firmware: uefi-insecure
+        # REQUIRED, not decoration: without this the baked disk carries no authorized key, the
+        # KubeVirt deploy cannot reach the guest over the substrate's port-forward, and the candy
+        # walk stalls with no output until the bed times out. Measured by diffing this entity
+        # against the P4 spike's ubuntu-runner-disk, which had exactly these fields and worked.
+        ssh:
+            user: ubuntu
+            port_auto: true
+            key_source: generate
+        cloud_init:
+            timezone: UTC
+            # The guest agent is what lets the substrate reach into a booted VM. Without it
+            # KubeVirt never reports AgentConnected, charly never opens the managed
+            # port-forward, and the deploy sits in deploy-add with no output until it times
+            # out. Baked into the disk so it is present on every boot, not just the first.
+            package:
+                - qemu-guest-agent
+            charly_install:
+                strategy: auto
+
+quant-dev:
+    kubernetes:
+        kubeconfig_context: kubernetes-admin@quant-dev
+        default_namespace: default
+        admission_policy: privileged
+        storage:
+            class_default: csi-cinder-high-speed-gen2
+
 githubrunner-ubuntu:
     vm:
         source:
@@ -109,19 +155,21 @@ githubrunner-ubuntu:
 # imported into the cluster rather than a libvirt domain on this host (decision D1, issue 37).
 githubrunner-ubuntu-vmi:
     kubevirt:
+        cluster: quant-dev
         namespace: default
         # The guest identity. A data_volume is a bare disk with no OCI metadata to read, so
         # unlike a containerDisk it MUST declare distro + ssh_user here (spec/schema/kubevirt.cue).
         distro: ubuntu
         ssh_user: ubuntu
-        # KubeVirt cannot boot a cloud_image directly the way the vm substrate can: the source
-        # vocabulary is container_disk | data_volume | pvc | clone. CDI imports the SAME upstream
-        # image into the cluster as a DataVolume, so both substrates still boot one Ubuntu image.
+        # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
+        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
+        # why data_volume+http cannot be used on this cluster).
         source:
-            kind: data_volume
-            size: 128Gi
-            data_volume:
-                http: {url: https://cloud-images.ubuntu.com/noble/20260926/noble-server-cloudimg-amd64.img}
+            kind: container_disk
+            image: ttl.sh/charly-githubrunner-ubuntu-disk:6h
+            pull_policy: Always
+            disk_path_in_image: /disk/disk.img
         run_strategy: Always
         memory: 32G
         cpu:
@@ -133,12 +181,49 @@ githubrunner-ubuntu-vmi:
             bootloader: efi
         cloud_init:
             timezone: UTC
+            package:
+                - qemu-guest-agent
             # charly reaches into the booted guest over the substrate's managed port-forward and
             # walks the candy's plan there; the recipe is never re-authored into cloud-init.
             charly_install:
                 strategy: auto
         description: >-
             The CI-runner Ubuntu VM on a KubeVirt substrate, composing candy/github-runner-ubuntu.
+
+# The KubeVirt bed. Unlike the libvirt bed this does NOT restate the recipe: it composes the
+# SAME candy onto the SAME entity through add_candy, which is what makes one recipe serve both
+# substrates. disposable: true is the authorization for the destroy/rebuild path it exercises.
+check-githubrunner-ubuntu-vmi:
+    kubevirt:
+        from: githubrunner-ubuntu-vmi
+        add_candy:
+            - github-runner-ubuntu
+        disposable: true
+        lifecycle: dev
+        plan:
+            - check: command=test -x /home/ubuntu/actions-runner-base/bin/Runner.Listener && test -S /run/docker-ci.sock && echo KUBEVIRT-CANDY-OK
+              id: candy-converged-on-kubevirt
+              description: |
+                The SAME candy that the libvirt bed proves here converges on a DIFFERENT
+                substrate. Asserts the two artifacts that only exist when the recipe actually
+                ran in this guest: the Actions runner agent binary, and the co-tenant
+                docker-ci.service socket. A bare textual check asserts nothing and charly would
+                try to execute the text as a command, so this carries a real command and the
+                `runtime` context that makes it a live probe rather than a mutating deploy step.
+              stdout:
+                - contains: KUBEVIRT-CANDY-OK
+              exit_status: 0
+              context: ['runtime']
+              command: |
+                set -euo pipefail
+                test -x /home/ubuntu/actions-runner-base/bin/Runner.Listener
+                test -S /run/docker-ci.sock
+                echo KUBEVIRT-CANDY-OK
+        description: |
+            R10 proof of the KubeVirt form of the CI-runner recipe, on the configured quant-dev
+            cluster. The candy is composed by THIS deploy over the substrate's managed
+            port-forward, so a green run proves the recipe is substrate-independent rather than
+            libvirt-specific, and that the data_volume/EFI/q35 boot path carries it.
 
 check-githubrunner-ubuntu-vm:
     vm:
