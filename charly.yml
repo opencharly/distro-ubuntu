@@ -199,6 +199,32 @@ githubrunner-ubuntu-vmi:
 # The KubeVirt bed. Unlike the libvirt bed this does NOT restate the recipe: it composes the
 # SAME candy onto the SAME entity through add_candy, which is what makes one recipe serve both
 # substrates. disposable: true is the authorization for the destroy/rebuild path it exercises.
+# The disk-builder's OWN bed. The vm: substrate BUILDS the box it boots, so a defect in
+# githubrunner-ubuntu-disk fails HERE -- which is the coverage the KubeVirt bed cannot give it,
+# because a kubevirt deploy can only reference a same-kind template and boots an image by reference.
+check-githubrunner-ubuntu-disk:
+    vm:
+        from: githubrunner-ubuntu-disk
+        disposable: true
+        lifecycle: dev
+        plan:
+            - check: command=test -f /etc/os-release && grep -q 'VERSION_CODENAME=noble' /etc/os-release && echo DISK-BUILD-OK
+              id: disk-built-and-bootable
+              description: |
+                Proves the disk builder actually produced a bootable noble rootfs: this guest was booted
+                from the built disk, so the assertion cannot pass if the build is broken.
+              stdout:
+                - contains: DISK-BUILD-OK
+              exit_status: 0
+              context: ['runtime']
+              command: |
+                set -euo pipefail
+                test -f /etc/os-release
+                grep -q 'VERSION_CODENAME=noble' /etc/os-release
+                echo DISK-BUILD-OK
+        description: |
+            R10 proof of githubrunner-ubuntu-disk. Fails without that entity, and therefore gives the
+            boot-disk builder the coverage the KubeVirt bed structurally cannot.
 check-githubrunner-ubuntu-vmi:
     kubevirt:
         from: githubrunner-ubuntu-vmi
