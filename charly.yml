@@ -89,338 +89,13 @@ githubrunner-ubuntu:
         firmware: uefi-insecure
         network: {mode: user}
         ssh: {user: ubuntu, port_auto: true, key_source: generate}
+        # The recipe — Docker, the co-tenant daemon split, both timers, the store GC, the
+        # runner tree — is NOT here any more. It is `candy/github-runner-ubuntu`, one
+        # canonical home composed by this entity's deploy AND by the KubeVirt one, so the
+        # same recipe serves both substrates instead of being re-authored per substrate
+        # (decision D1, issue 37).
         cloud_init:
             timezone: UTC
-            package:
-                - git
-                - curl
-                - jq
-                - unzip
-                - zip
-                - rsync
-                - tree
-                - build-essential
-                - pkg-config
-                - python3
-                - python3-pip
-                - python3-venv
-                - ca-certificates
-                - gnupg
-                - apt-transport-https
-                - qemu-guest-agent
-                - libicu74
-                - libkrb5-3
-                - libssl3t64
-                - libunwind8
-                - liblttng-ust1t64
-                - shellcheck
-                - bc
-                - less
-                - lsof
-                - strace
-                - netcat-openbsd
-                - dnsutils
-                - ripgrep
-                - moreutils
-                - slirp4netns
-                - uidmap
-                - fuse-overlayfs
-            write_files:
-                - path: /etc/systemd/system/docker-ci.service
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Unit]
-                    # OpenCharly CI Docker daemon. Deliberately NOT docker.service:
-                    # the logging-collector lane runs
-                    # `systemctl stop docker.service docker.socket`, which must not
-                    # stop the daemon every co-tenant lane is using (RCA 2026-10-10).
-                    Description=OpenCharly CI Docker daemon (co-tenant-safe)
-                    After=network-online.target containerd.service
-                    Wants=network-online.target
-
-                    [Service]
-                    Type=notify
-                    # Own socket path: a lane that relinks /var/run/docker.sock must
-                    # not be able to redirect this daemon's own socket.
-                    ExecStart=/usr/bin/dockerd -H unix:///run/docker-ci.sock --containerd=/run/containerd/containerd.sock
-                    ExecReload=/bin/kill -s HUP $MAINPID
-                    TimeoutStartSec=0
-                    Restart=always
-                    RestartSec=2
-                    LimitNOFILE=infinity
-                    LimitNPROC=infinity
-                    Delegate=yes
-                    KillMode=process
-
-                    [Install]
-                    WantedBy=multi-user.target
-                - path: /usr/local/sbin/charly-docker-sock-heal
-                  owner: root:root
-                  perms: "0755"
-                  content: |
-                    #!/bin/sh
-                    # Restore ONLY a dangling /var/run/docker.sock, so a lane that
-                    # legitimately relinked it keeps working while it runs.
-                    t=$(readlink -f /var/run/docker.sock 2>/dev/null)
-                    [ -n "$t" ] && [ -S "$t" ] && exit 0
-                    ln -sfn /run/docker-ci.sock /var/run/docker.sock
-                - path: /etc/systemd/system/charly-docker-sock-heal.service
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Unit]
-                    Description=Restore /var/run/docker.sock after a CI lane left it dangling
-                    [Service]
-                    Type=oneshot
-                    ExecStart=/usr/local/sbin/charly-docker-sock-heal
-                - path: /etc/systemd/system/charly-docker-sock-heal.timer
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Unit]
-                    Description=Periodically restore a dangling /var/run/docker.sock
-                    [Timer]
-                    OnBootSec=60s
-                    OnUnitActiveSec=30s
-                    [Install]
-                    WantedBy=timers.target
-                - path: /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-1.service.d/docker-host.conf
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Service]
-                    Environment=DOCKER_HOST=unix:///run/docker-ci.sock
-                - path: /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-2.service.d/docker-host.conf
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Service]
-                    Environment=DOCKER_HOST=unix:///run/docker-ci.sock
-                - path: /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-3.service.d/docker-host.conf
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Service]
-                    Environment=DOCKER_HOST=unix:///run/docker-ci.sock
-                - path: /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-4.service.d/docker-host.conf
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Service]
-                    Environment=DOCKER_HOST=unix:///run/docker-ci.sock
-                - path: /usr/local/sbin/charly-docker-store-gc
-                  owner: root:root
-                  perms: "0755"
-                  content: |
-                    #!/bin/sh
-                    # OpenCharly CI VM docker store GC (v2).
-                    #
-                    # Collects what the CI's own workflows leak on a SHARED, long-lived host. The
-                    # workflows assume one job per machine, where every job's container dies with the
-                    # machine; here four runners share one daemon and one store, so nothing collects:
-                    #   * every `docker/setup-buildx-action` starts a buildkit builder container with its
-                    #     own anonymous cache volume (~5-7 GB). A lane that is cancelled, times out, or
-                    #     whose runner restarts leaves it RUNNING, so `docker container prune` can never
-                    #     remove it. Measured 2026-10-10: 13 such builders held 84 GB and filled the guest
-                    #     disk to 100%, after which lanes failed with ENOSPC and their logs were no longer
-                    #     uploadable (BlobNotFound in Jobs that never touched docker).
-                    #   * a lane also leaves the ubuntu user's docker context + buildx selection pointing
-                    #     at its deleted job directory, which breaks every later docker CLI call that does
-                    #     not set DOCKER_HOST — including the cleanup commands that would have helped.
-                    #
-                    # Safety rule: the ONLY builders this may remove while lanes run are (a) those whose
-                    # endpoint socket no longer exists (their owning job is gone by construction) and
-                    # (b) the surplus above the number of ACTIVE runner jobs, oldest LAST-ACTIVITY first —
-                    # an actively building builder updates its activity file continuously, so it is never
-                    # the oldest. When no job is running, nothing is in use and everything is collected.
-                    HOST=unix:///run/docker-ci.sock
-                    BX=/home/ubuntu/.docker/buildx
-                    D() { docker --host "$HOST" "$@"; }
-                    # buildx state (instances/, activity/, current) lives in the RUNNER USER's home, so
-                    # every buildx verb must run as that user or it reads root's empty state.
-                    DB() { sudo -u ubuntu docker --host "$HOST" "$@"; }
-                    # EVERY builder buildx knows about, except the built-in `default` docker-driver one:
-                    # keying on the name shape `builder-<hex>` that setup-buildx-action generates missed
-                    # every builder a lane created under any other name (measured in the R10 bed).
-                    builder_names() {
-                      DB buildx ls 2>/dev/null | awk '{print $1}' | grep -vE '^(NAME/NODE|\\_|$)' | sed 's/\*$//' | grep -vx default
-                    }
-                    CFG=/home/ubuntu/.docker/config.json
-
-                    # 1. repair CLI state a CI lane left pointing at a deleted job directory
-                    if [ -f "$CFG" ]; then
-                      ctx=$(python3 -c 'import json;print(json.load(open("'"$CFG"'")).get("currentContext","default"))' 2>/dev/null)
-                      if [ -n "$ctx" ] && [ "$ctx" != "default" ] && ! docker context inspect "$ctx" >/dev/null 2>&1; then
-                        python3 - "$CFG" <<'PY'
-                    import json,sys
-                    p=sys.argv[1]; d=json.load(open(p)); d["currentContext"]="default"
-                    json.dump(d,open(p,"w"),indent="\t")
-                    PY
-                        echo "gc: reset stale docker context '$ctx' -> default"
-                      fi
-                    fi
-                    if [ -f "$BX/current" ]; then
-                      name=$(python3 -c 'import json;print(json.load(open("'"$BX"'/current")).get("Name",""))' 2>/dev/null)
-                      if [ -n "$name" ] && ! DB buildx inspect "$name" >/dev/null 2>&1; then
-                        rm -f "$BX/current"
-                        echo "gc: cleared stale buildx selection '$name'"
-                      fi
-                    fi
-
-                    # count by process NAME: `pgrep -f` would also match any shell whose command line
-                    # merely mentions the string (a lane grepping for it, or this very check), inflating
-                    # the count and making the surplus rule keep leaks.
-                    # Thresholds are overridable so the bed can drive each purge branch deterministically
-                    # (defaults are the production values; 0 disables the age floor and skips the filter,
-                    # because docker rejects a zero `until=`).
-                    MIN_AGE=${CHARLY_GC_MIN_AGE:-20m}
-                    PRESSURE_AGE=${CHARLY_GC_PRESSURE_AGE:-70m}
-                    PRESSURE_PCT=${CHARLY_GC_PRESSURE_PCT:-80}
-                    jobs=$(pgrep -xc Runner.Worker 2>/dev/null || true)
-                    jobs=${jobs:-0}
-                    use=$(df --output=pcent / | tail -1 | tr -dc '0-9')
-
-                    # 2. builders whose endpoint socket is gone: their job is gone by construction
-                    for n in $(builder_names); do
-                      # trim: `buildx inspect` pads the endpoint with spaces, and an untrimmed value
-                      # makes the -S test false for EVERY builder (measured: it deleted 15 builders
-                      # including two live lanes' — the bug that made this rule dangerous).
-                      ep=$(DB buildx inspect "$n" 2>/dev/null | awk -F'Endpoint: ' '/Endpoint:/{print $2; exit}' | tr -d " ")
-                      sock=${ep#unix://}
-                      [ -z "$sock" ] && continue
-                      if [ -n "$sock" ] && [ ! -S "$sock" ]; then
-                        echo "gc: removing builder '$n' (endpoint gone: $ep)"
-                        DB buildx rm --force "$n" >/dev/null 2>&1
-                      fi
-                    done
-
-                    # 3. surplus builders above the active job count, oldest last-activity first
-                    while :; do
-                      names=$(builder_names)
-                      count=$(printf '%s\n' $names | grep -c . || true)
-                      [ "${count:-0}" -le "${jobs:-0}" ] && break
-                      oldest=$(for n in $names; do [ -f "$BX/activity/$n" ] && stat -c '%Y %n' "$BX/activity/$n"; done | sort -n | head -1 | cut -d' ' -f2-)
-                      [ -z "$oldest" ] && break
-                      echo "gc: removing surplus builder '$(basename "$oldest")' (builders=$count jobs=$jobs)"
-                      DB buildx rm --force "$(basename "$oldest")" >/dev/null 2>&1 || break
-                    done
-
-                    # 4. always: age-filtered prune (2h) - cannot touch an in-flight lane
-                    D container prune -f --filter until=2h >/dev/null 2>&1
-                    D image prune -af --filter until=2h >/dev/null 2>&1
-                    D volume prune -af --filter until=2h >/dev/null 2>&1
-                    D builder prune -af --filter until=2h >/dev/null 2>&1
-
-                    # 5. idle or under disk pressure: collect everything the finished lanes left
-                    if [ "${jobs:-0}" -eq 0 ] || [ "${use:-0}" -gt "${PRESSURE_PCT:-80}" ]; then
-                      if [ "${jobs:-0}" -eq 0 ]; then
-                        # age grace: a job that started between the job-count probe above and this purge
-                        # would otherwise lose its containers, so nothing younger than 20 minutes is touched
-                        case "$MIN_AGE" in 0|0m|0s) ids=$(D ps -aq);; *) ids=$(D ps -aq --filter "until=$MIN_AGE");; esac
-                      else
-                        case "$PRESSURE_AGE" in 0|0m|0s) ids=$(D ps -aq);; *) ids=$(D ps -aq --filter "until=$PRESSURE_AGE");; esac
-                      fi
-                      [ -n "$ids" ] && D rm -f $ids >/dev/null 2>&1
-                      rm -f "$BX/current" 2>/dev/null
-                      D volume prune -af >/dev/null 2>&1
-                      D image prune -af >/dev/null 2>&1
-                      D builder prune -af >/dev/null 2>&1
-                      echo "gc: collected (jobs=$jobs use=${use}%) -> $(df -h / | tail -1 | awk '{print $4}') free"
-                    fi
-                - path: /etc/systemd/system/charly-docker-store-gc.service
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Unit]
-                    Description=Collect leaked CI docker builders/volumes and repair stale CLI state
-                    [Service]
-                    Type=oneshot
-                    ExecStart=/usr/local/sbin/charly-docker-store-gc
-                - path: /etc/systemd/system/charly-docker-store-gc.timer
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Unit]
-                    Description=Run the CI docker store GC every 10 minutes
-                    [Timer]
-                    OnBootSec=5min
-                    OnUnitActiveSec=10min
-                    [Install]
-                    WantedBy=timers.target
-                - path: /etc/sysctl.d/99-charly-ci-userns.conf
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor
-                    # by default, which breaks CI lanes that sandbox themselves with
-                    # bubblewrap (measured: Image Runtime Startup, 2026-10-10 —
-                    # `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`)
-                    # and every rootless-container path inside a job (uid_map write
-                    # denied). The hosted images the workflows were written for allow
-                    # them.
-                    kernel.apparmor_restrict_unprivileged_userns = 0
-                    kernel.unprivileged_userns_clone = 1
-                - path: /etc/systemd/journald.conf.d/charly-ci.conf
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Journal]
-                    SystemMaxUse=200M
-            runcmd:
-                - systemctl enable --now qemu-guest-agent
-                - install -m 0755 -d /etc/apt/keyrings
-                - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-                - chmod a+r /etc/apt/keyrings/docker.asc
-                - printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable\n' > /etc/apt/sources.list.d/docker.list
-                - apt-get update -qq
-                # Docker version the CI expects: setup-test-docker pins v29.4.0 and asserts
-                # `docker version --format '{{.Server.Version}}' = 29.4.0`. Installed exact and
-                # held so no lane can silently drift the system daemon.
-                - DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --allow-downgrades docker-ce=5:29.4.0-1~ubuntu.24.04~noble docker-ce-cli=5:29.4.0-1~ubuntu.24.04~noble containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
-                - apt-mark hold docker-ce docker-ce-cli
-                - usermod -aG docker ubuntu
-                # --- co-tenant-safe daemon: stock units inactive, ours active ---
-                - systemctl disable --now docker.service docker.socket || true
-                - systemctl daemon-reload
-                - systemctl enable --now docker-ci.service || true
-                - ln -sfn /run/docker-ci.sock /var/run/docker.sock
-                - systemctl enable --now charly-docker-sock-heal.timer || true
-                - sysctl -p /etc/sysctl.d/99-charly-ci-userns.conf
-                # Store GC: collect leaked buildkit builders/volumes (each
-                # setup-buildx-action starts a builder with its own cache volume) and
-                # repair the stale docker context/buildx selection a lane leaves behind.
-                - systemctl daemon-reload
-                - systemctl enable --now charly-docker-store-gc.timer || true
-                - systemctl restart systemd-journald || true
-                - docker version
-                # --- self-hosted runner tree + the EXACT label set (this config is the source of truth) ---
-                # The runner tree is installed here; REGISTRATION is a separate,
-                # token-guarded operator step because a registration token lives 1h
-                # (same doctrine as pod-github-runner's `post_enable` hook):
-                #   TOKEN=$(gh api -X POST /orgs/opencharly/actions/runners/registration-token --jq .token)
-                #   LABELS=$(cat /etc/charly-runner-labels)
-                #   for i in 1 2 3 4; do D=/home/ubuntu/actions-runner/$i; mkdir -p $D;
-                #     cp -a /home/ubuntu/actions-runner-base/. $D/;
-                #     (cd $D && ./config.sh --unattended --url https://github.com/opencharly --token $TOKEN \
-                #        --name charly-githubrunner-ubuntu-$i --labels "$LABELS" --replace --work _work \
-                #        && sudo ./svc.sh install ubuntu && sudo ./svc.sh start); done
-                # NOTE: cloud-init runcmd runs as ROOT, so every path here is absolute
-                # (/home/ubuntu, never $HOME — the earlier $HOME form wrote the runner
-                # tree into /root and every registration failed).
-                - curl -fsSL -o /tmp/runner.tgz https://github.com/actions/runner/releases/download/v2.337.0/actions-runner-linux-x64-2.337.0.tar.gz
-                - install -d -o ubuntu -g ubuntu -m 0755 /home/ubuntu/actions-runner-base
-                - tar xzf /tmp/runner.tgz -C /home/ubuntu/actions-runner-base && chown -R ubuntu:ubuntu /home/ubuntu/actions-runner-base
-                - printf '%s\n' 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vcpu-ubuntu-2404,blacksmith-32vcpu-ubuntu-2404' > /etc/charly-runner-labels
-                - printf '%s\n' 'opencharly' > /etc/charly-runner-labels-org   # runners 3-4
-                # OOM insurance for 4 concurrent CI lanes: the cloud kernel ships NO zram
-                # module (systemd-zram-setup@zram0 fails on dev-zram0.device), so swap is
-                # a file. Measured with 4 lanes: no swap use, but peaks reach ~12 GiB of
-                # the old 15 GiB VM — the 32 GiB resize removes the pressure.
-                - if ! swapon --show=NAME | grep -q '^/swapfile$'; then fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none; chmod 600 /swapfile; mkswap /swapfile >/dev/null; swapon /swapfile; fi
-                - grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-
-
 # Disposable R10 bed for the CI-runner VM entity above. `disposable: true` is the sole
 # authorization for the unattended destroy+rebuild `charly check run` drives. Every step
 # is anchored on the MECHANISM it proves, never on a proxy for it: the pinned Docker
@@ -429,9 +104,50 @@ githubrunner-ubuntu:
 # the token-guarded registration consumes. REGISTRATION itself is NOT here — a
 # registration token lives one hour and is never committed (same doctrine as
 # pod-github-runner's `post_enable` hook).
+# The KubeVirt substrate leg of the same VM. It composes the SAME candy the libvirt entity
+# and its bed do, so the recipe has one home and this is only the substrate: a cloud image
+# imported into the cluster rather than a libvirt domain on this host (decision D1, issue 37).
+githubrunner-ubuntu-vmi:
+    kubevirt:
+        namespace: default
+        # The guest identity. A data_volume is a bare disk with no OCI metadata to read, so
+        # unlike a containerDisk it MUST declare distro + ssh_user here (spec/schema/kubevirt.cue).
+        distro: ubuntu
+        ssh_user: ubuntu
+        # KubeVirt cannot boot a cloud_image directly the way the vm substrate can: the source
+        # vocabulary is container_disk | data_volume | pvc | clone. CDI imports the SAME upstream
+        # image into the cluster as a DataVolume, so both substrates still boot one Ubuntu image.
+        source:
+            kind: data_volume
+            size: 128Gi
+            data_volume:
+                http: {url: https://cloud-images.ubuntu.com/noble/20260926/noble-server-cloudimg-amd64.img}
+        run_strategy: Always
+        memory: 32G
+        cpu:
+            cores: 16
+        machine: q35
+        # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
+        # bios default would boot nothing.
+        firmware:
+            bootloader: efi
+        cloud_init:
+            timezone: UTC
+            # charly reaches into the booted guest over the substrate's managed port-forward and
+            # walks the candy's plan there; the recipe is never re-authored into cloud-init.
+            charly_install:
+                strategy: auto
+        description: >-
+            The CI-runner Ubuntu VM on a KubeVirt substrate, composing candy/github-runner-ubuntu.
+
 check-githubrunner-ubuntu-vm:
     vm:
         from: githubrunner-ubuntu
+        # The recipe is applied by THIS candy through the deploy's InstallPlan — in the
+        # guest, over the substrate's SSH — so the bed keeps its "wait for first boot,
+        # then assert" shape and the recipe stops being cloud-init that a bed has to race.
+        add_candy:
+            - github-runner-ubuntu
         disposable: true
         lifecycle: dev
         description: |
@@ -1582,4 +1298,3 @@ ubuntu-skill:
             - Adding any Ubuntu-based box (it will inherit the adopt-mode `ubuntu:ubuntu` identity by default).
             - Debugging `${USER}` / `${HOME}` differences between Ubuntu and other deb-based boxes (ubuntu-coder → `ubuntu:/home/ubuntu`; debian-coder → `user:/home/user`).
             - Understanding why ubuntu-coder's `/etc/sudoers.d/charly-user` says `ubuntu ALL=(ALL) NOPASSWD: ALL` rather than `user`.
-

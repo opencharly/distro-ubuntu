@@ -1,0 +1,6 @@
+#!/bin/sh
+# Restore ONLY a dangling /var/run/docker.sock, so a lane that
+# legitimately relinked it keeps working while it runs.
+t=$(readlink -f /var/run/docker.sock 2>/dev/null)
+[ -n "$t" ] && [ -S "$t" ] && exit 0
+ln -sfn /run/docker-ci.sock /var/run/docker.sock

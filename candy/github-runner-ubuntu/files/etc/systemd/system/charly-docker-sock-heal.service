@@ -1,0 +1,5 @@
+[Unit]
+Description=Restore /var/run/docker.sock after a CI lane left it dangling
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/charly-docker-sock-heal
