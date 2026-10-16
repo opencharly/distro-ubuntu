@@ -137,8 +137,10 @@ githubrunner-ubuntu:
         ssh: {user: ubuntu, port_auto: true, key_source: generate}
         # The recipe — Docker, the co-tenant daemon split, both timers, the store GC, the
         # runner tree — is NOT here any more. It is `candy/github-runner-ubuntu`, one
-        # canonical home composed by this entity's deploy AND by the KubeVirt one, so the
-        # same recipe serves both substrates instead of being re-authored per substrate
+        # canonical home composed by the deploy of each substrate's bed --
+        # check-githubrunner-ubuntu-vm via add_candy on this box, and
+        # check-githubrunner-ubuntu-vmi via add_candy on the KubeVirt template -- so the same
+        # recipe serves both substrates instead of being re-authored per substrate
         # (decision D1, issue 37).
         cloud_init:
             timezone: UTC
@@ -188,7 +190,11 @@ githubrunner-ubuntu-vmi:
             charly_install:
                 strategy: auto
         description: >-
-            The CI-runner Ubuntu VM on a KubeVirt substrate, composing candy/github-runner-ubuntu.
+            The CI-runner Ubuntu VM on a KubeVirt substrate. This TEMPLATE authors only the boot
+            medium and the domain shape; the recipe is applied by its deploy,
+            check-githubrunner-ubuntu-vmi, which composes candy/github-runner-ubuntu through
+            add_candy. It cannot be composed here: a venue-bearing kubevirt node is classified as
+            a template by the loader, and templates reject add_candy.
 
 # The KubeVirt bed. Unlike the libvirt bed this does NOT restate the recipe: it composes the
 # SAME candy onto the SAME entity through add_candy, which is what makes one recipe serve both
