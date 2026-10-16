@@ -1,0 +1,303 @@
+github-runner-ubuntu:
+    candy:
+        description: |-
+            The canonical, co-tenant-safe Ubuntu CI-runner recipe: the Docker daemon and its
+            GC/socket-heal timers, the CI userns and journald settings, and the four supervised
+            Actions runners. Extracted from the kind: vm entity that used to carry it as
+            cloud-init, so the SAME recipe serves every substrate (decision D1, opencharly/distro-ubuntu
+            issue 37) — a KubeVirt entity used to have to re-author all of it. Runner REGISTRATION
+            stays an operator step: a token lives one hour and is never committed.
+        distro:
+            ubuntu:
+                package:
+                    - git
+                    - curl
+                    - jq
+                    - unzip
+                    - zip
+                    - rsync
+                    - tree
+                    - build-essential
+                    - pkg-config
+                    - python3
+                    - python3-pip
+                    - python3-venv
+                    - ca-certificates
+                    - gnupg
+                    - apt-transport-https
+                    - qemu-guest-agent
+                    - libicu74
+                    - libkrb5-3
+                    - libssl3t64
+                    - libunwind8
+                    - liblttng-ust1t64
+                    - shellcheck
+                    - bc
+                    - less
+                    - lsof
+                    - strace
+                    - netcat-openbsd
+                    - dnsutils
+                    - ripgrep
+                    - moreutils
+                    - slirp4netns
+                    - uidmap
+                    - fuse-overlayfs
+        plan:
+            - run: "install /etc/systemd/system/docker-ci.service as 0644"
+              copy: "files/etc/systemd/system/docker-ci.service"
+              to: "/etc/systemd/system/docker-ci.service"
+              mode: "0644"
+              run_as: root
+              id: "file-01-docker-ci-service"
+            - run: "install /usr/local/sbin/charly-docker-sock-heal as 0755"
+              copy: "files/usr/local/sbin/charly-docker-sock-heal"
+              to: "/usr/local/sbin/charly-docker-sock-heal"
+              mode: "0755"
+              run_as: root
+              id: "file-02-charly-docker-sock-heal"
+            - run: "install /etc/systemd/system/charly-docker-sock-heal.service as 0644"
+              copy: "files/etc/systemd/system/charly-docker-sock-heal.service"
+              to: "/etc/systemd/system/charly-docker-sock-heal.service"
+              mode: "0644"
+              run_as: root
+              id: "file-03-charly-docker-sock-heal-service"
+            - run: "install /etc/systemd/system/charly-docker-sock-heal.timer as 0644"
+              copy: "files/etc/systemd/system/charly-docker-sock-heal.timer"
+              to: "/etc/systemd/system/charly-docker-sock-heal.timer"
+              mode: "0644"
+              run_as: root
+              id: "file-04-charly-docker-sock-heal-timer"
+            - run: "install /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-1.service.d/docker-host.conf as 0644"
+              copy: "files/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-1.service.d/docker-host.conf"
+              to: "/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-1.service.d/docker-host.conf"
+              mode: "0644"
+              run_as: root
+              id: "file-05-docker-host-conf"
+            - run: "install /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-2.service.d/docker-host.conf as 0644"
+              copy: "files/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-2.service.d/docker-host.conf"
+              to: "/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-2.service.d/docker-host.conf"
+              mode: "0644"
+              run_as: root
+              id: "file-06-docker-host-conf"
+            - run: "install /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-3.service.d/docker-host.conf as 0644"
+              copy: "files/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-3.service.d/docker-host.conf"
+              to: "/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-3.service.d/docker-host.conf"
+              mode: "0644"
+              run_as: root
+              id: "file-07-docker-host-conf"
+            - run: "install /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-4.service.d/docker-host.conf as 0644"
+              copy: "files/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-4.service.d/docker-host.conf"
+              to: "/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-4.service.d/docker-host.conf"
+              mode: "0644"
+              run_as: root
+              id: "file-08-docker-host-conf"
+            - run: "install /usr/local/sbin/charly-docker-store-gc as 0755"
+              copy: "files/usr/local/sbin/charly-docker-store-gc"
+              to: "/usr/local/sbin/charly-docker-store-gc"
+              mode: "0755"
+              run_as: root
+              id: "file-09-charly-docker-store-gc"
+            - run: "install /etc/systemd/system/charly-docker-store-gc.service as 0644"
+              copy: "files/etc/systemd/system/charly-docker-store-gc.service"
+              to: "/etc/systemd/system/charly-docker-store-gc.service"
+              mode: "0644"
+              run_as: root
+              id: "file-10-charly-docker-store-gc-service"
+            - run: "install /etc/systemd/system/charly-docker-store-gc.timer as 0644"
+              copy: "files/etc/systemd/system/charly-docker-store-gc.timer"
+              to: "/etc/systemd/system/charly-docker-store-gc.timer"
+              mode: "0644"
+              run_as: root
+              id: "file-11-charly-docker-store-gc-timer"
+            - run: "install /etc/sysctl.d/99-charly-ci-userns.conf as 0644"
+              copy: "files/etc/sysctl.d/99-charly-ci-userns.conf"
+              to: "/etc/sysctl.d/99-charly-ci-userns.conf"
+              mode: "0644"
+              run_as: root
+              id: "file-12-99-charly-ci-userns-conf"
+            - run: "install /etc/systemd/journald.conf.d/charly-ci.conf as 0644"
+              copy: "files/etc/systemd/journald.conf.d/charly-ci.conf"
+              to: "/etc/systemd/journald.conf.d/charly-ci.conf"
+              mode: "0644"
+              run_as: root
+              id: "file-13-charly-ci-conf"
+            - run: "step 1 \u2014 systemctl enable --now qemu-guest-agent"
+              id: "cmd-01-systemctl-enable-now-qemu-guest-agent"
+              run_as: root
+              context: [deploy]
+              command: |
+                  systemctl enable --now qemu-guest-agent
+            - run: "step 2 \u2014 install -m 0755 -d /etc/apt/keyrings"
+              id: "cmd-02-install-m-0755-d-etc-apt-keyrings"
+              run_as: root
+              context: [deploy]
+              command: |
+                  install -m 0755 -d /etc/apt/keyrings
+            - run: "step 3 \u2014 curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/ke"
+              id: "cmd-03-curl-fssl-https-download-docker-com-linu"
+              run_as: root
+              context: [deploy]
+              command: |
+                  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+            - run: "step 4 \u2014 chmod a+r /etc/apt/keyrings/docker.asc"
+              id: "cmd-04-chmod-a-r-etc-apt-keyrings-docker-asc"
+              run_as: root
+              context: [deploy]
+              command: |
+                  chmod a+r /etc/apt/keyrings/docker.asc
+            - run: "step 5 \u2014 printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https:"
+              id: "cmd-05-printf-deb-arch-amd64-signed-by-etc-apt-"
+              run_as: root
+              context: [deploy]
+              command: |
+                  printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable\n' > /etc/apt/sources.list.d/docker.list
+            - run: "step 6 \u2014 apt-get update -qq"
+              id: "cmd-06-apt-get-update-qq"
+              run_as: root
+              context: [deploy]
+              command: |
+                  apt-get update -qq
+            - run: "step 7 \u2014 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --allow-downgrad"
+              id: "cmd-07-debian-frontend-noninteractive-apt-get-i"
+              run_as: root
+              context: [deploy]
+              command: |
+                  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --allow-downgrades docker-ce=5:29.4.0-1~ubuntu.24.04~noble docker-ce-cli=5:29.4.0-1~ubuntu.24.04~noble containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+            - run: "step 8 \u2014 apt-mark hold docker-ce docker-ce-cli"
+              id: "cmd-08-apt-mark-hold-docker-ce-docker-ce-cli"
+              run_as: root
+              context: [deploy]
+              command: |
+                  apt-mark hold docker-ce docker-ce-cli
+            - run: "step 9 \u2014 usermod -aG docker ubuntu"
+              id: "cmd-09-usermod-ag-docker-ubuntu"
+              run_as: root
+              context: [deploy]
+              command: |
+                  usermod -aG docker ubuntu
+            - run: "step 10 \u2014 systemctl disable --now docker.service docker.socket || true"
+              id: "cmd-10-systemctl-disable-now-docker-service-doc"
+              run_as: root
+              context: [deploy]
+              command: |
+                  systemctl disable --now docker.service docker.socket || true
+            - run: "step 11 \u2014 systemctl daemon-reload"
+              id: "cmd-11-systemctl-daemon-reload"
+              run_as: root
+              context: [deploy]
+              command: |
+                  systemctl daemon-reload
+            - run: "step 12 \u2014 systemctl enable --now docker-ci.service || true"
+              id: "cmd-12-systemctl-enable-now-docker-ci-service-t"
+              run_as: root
+              context: [deploy]
+              command: |
+                  systemctl enable --now docker-ci.service || true
+            - run: "step 13 \u2014 ln -sfn /run/docker-ci.sock /var/run/docker.sock"
+              id: "cmd-13-ln-sfn-run-docker-ci-sock-var-run-docker"
+              run_as: root
+              context: [deploy]
+              command: |
+                  ln -sfn /run/docker-ci.sock /var/run/docker.sock
+            - run: "step 14 \u2014 systemctl enable --now charly-docker-sock-heal.timer || true"
+              id: "cmd-14-systemctl-enable-now-charly-docker-sock-"
+              run_as: root
+              context: [deploy]
+              command: |
+                  systemctl enable --now charly-docker-sock-heal.timer || true
+            - run: "step 15 \u2014 sysctl -p /etc/sysctl.d/99-charly-ci-userns.conf"
+              id: "cmd-15-sysctl-p-etc-sysctl-d-99-charly-ci-usern"
+              run_as: root
+              context: [deploy]
+              command: |
+                  sysctl -p /etc/sysctl.d/99-charly-ci-userns.conf
+            - run: "step 16 \u2014 systemctl daemon-reload"
+              id: "cmd-16-systemctl-daemon-reload"
+              run_as: root
+              context: [deploy]
+              command: |
+                  systemctl daemon-reload
+            - run: "step 17 \u2014 systemctl enable --now charly-docker-store-gc.timer || true"
+              id: "cmd-17-systemctl-enable-now-charly-docker-store"
+              run_as: root
+              context: [deploy]
+              command: |
+                  systemctl enable --now charly-docker-store-gc.timer || true
+            - run: "step 18 \u2014 systemctl restart systemd-journald || true"
+              id: "cmd-18-systemctl-restart-systemd-journald-true"
+              run_as: root
+              context: [deploy]
+              command: |
+                  systemctl restart systemd-journald || true
+            - run: "step 19 \u2014 docker version"
+              id: "cmd-19-docker-version"
+              run_as: root
+              context: [deploy]
+              command: |
+                  docker version
+            - run: "step 20 \u2014 curl -fsSL -o /tmp/runner.tgz https://github.com/actions/runner/releas"
+              id: "cmd-20-curl-fssl-o-tmp-runner-tgz-https-github-"
+              run_as: root
+              context: [deploy]
+              command: |
+                  curl -fsSL -o /tmp/runner.tgz https://github.com/actions/runner/releases/download/v2.337.0/actions-runner-linux-x64-2.337.0.tar.gz
+            - run: "step 21 \u2014 install -d -o ubuntu -g ubuntu -m 0755 /home/ubuntu/actions-runner-bas"
+              id: "cmd-21-install-d-o-ubuntu-g-ubuntu-m-0755-home-"
+              run_as: root
+              context: [deploy]
+              command: |
+                  install -d -o ubuntu -g ubuntu -m 0755 /home/ubuntu/actions-runner-base
+            - run: "step 22 \u2014 tar xzf /tmp/runner.tgz -C /home/ubuntu/actions-runner-base && chown -"
+              id: "cmd-22-tar-xzf-tmp-runner-tgz-c-home-ubuntu-act"
+              run_as: root
+              context: [deploy]
+              command: |
+                  tar xzf /tmp/runner.tgz -C /home/ubuntu/actions-runner-base && chown -R ubuntu:ubuntu /home/ubuntu/actions-runner-base
+            - run: "step 23 \u2014 printf '%s\\n' 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vc"
+              id: "cmd-23-printf-s-n-opencharly-blacksmith-8vcpu-u"
+              run_as: root
+              context: [deploy]
+              command: |
+                  printf '%s\n' 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vcpu-ubuntu-2404,blacksmith-32vcpu-ubuntu-2404' > /etc/charly-runner-labels
+            - run: "step 24 \u2014 printf '%s\\n' 'opencharly' > /etc/charly-runner-labels-org"
+              id: "cmd-24-printf-s-n-opencharly-etc-charly-runner-"
+              run_as: root
+              context: [deploy]
+              command: |
+                  printf '%s\n' 'opencharly' > /etc/charly-runner-labels-org
+            - run: "step 25 \u2014 if ! swapon --show=NAME | grep -q '^/swapfile$'; then fallocate -l 8G "
+              id: "cmd-25-if-swapon-show-name-grep-q-swapfile-then"
+              run_as: root
+              context: [deploy]
+              command: |
+                  if ! swapon --show=NAME | grep -q '^/swapfile$'; then fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none; chmod 600 /swapfile; mkswap /swapfile >/dev/null; swapon /swapfile; fi
+            - run: "step 26 \u2014 grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >"
+              id: "cmd-26-grep-q-swapfile-etc-fstab-echo-swapfile-"
+              run_as: root
+              context: [deploy]
+              command: |
+                  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+            - check: the co-tenant CI docker daemon is listening on its own socket
+              id: check-docker-ci-socket
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  test -S /run/docker-ci.sock
+            - check: the CI userns sysctl is applied on the guest
+              id: check-userns-sysctl
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  sysctl -n kernel.unprivileged_userns_clone
+              stdout:
+                  contains: "1"
+            - check: the Actions runner agent binary is installed and executable
+              id: check-runner-agent
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  test -x /home/ubuntu/actions-runner-base/bin/Runner.Listener

@@ -1,0 +1,115 @@
+#!/bin/sh
+# OpenCharly CI VM docker store GC (v2).
+#
+# Collects what the CI's own workflows leak on a SHARED, long-lived host. The
+# workflows assume one job per machine, where every job's container dies with the
+# machine; here four runners share one daemon and one store, so nothing collects:
+#   * every `docker/setup-buildx-action` starts a buildkit builder container with its
+#     own anonymous cache volume (~5-7 GB). A lane that is cancelled, times out, or
+#     whose runner restarts leaves it RUNNING, so `docker container prune` can never
+#     remove it. Measured 2026-10-10: 13 such builders held 84 GB and filled the guest
+#     disk to 100%, after which lanes failed with ENOSPC and their logs were no longer
+#     uploadable (BlobNotFound in Jobs that never touched docker).
+#   * a lane also leaves the ubuntu user's docker context + buildx selection pointing
+#     at its deleted job directory, which breaks every later docker CLI call that does
+#     not set DOCKER_HOST — including the cleanup commands that would have helped.
+#
+# Safety rule: the ONLY builders this may remove while lanes run are (a) those whose
+# endpoint socket no longer exists (their owning job is gone by construction) and
+# (b) the surplus above the number of ACTIVE runner jobs, oldest LAST-ACTIVITY first —
+# an actively building builder updates its activity file continuously, so it is never
+# the oldest. When no job is running, nothing is in use and everything is collected.
+HOST=unix:///run/docker-ci.sock
+BX=/home/ubuntu/.docker/buildx
+D() { docker --host "$HOST" "$@"; }
+# buildx state (instances/, activity/, current) lives in the RUNNER USER's home, so
+# every buildx verb must run as that user or it reads root's empty state.
+DB() { sudo -u ubuntu docker --host "$HOST" "$@"; }
+# EVERY builder buildx knows about, except the built-in `default` docker-driver one:
+# keying on the name shape `builder-<hex>` that setup-buildx-action generates missed
+# every builder a lane created under any other name (measured in the R10 bed).
+builder_names() {
+  DB buildx ls 2>/dev/null | awk '{print $1}' | grep -vE '^(NAME/NODE|\\_|$)' | sed 's/\*$//' | grep -vx default
+}
+CFG=/home/ubuntu/.docker/config.json
+
+# 1. repair CLI state a CI lane left pointing at a deleted job directory
+if [ -f "$CFG" ]; then
+  ctx=$(python3 -c 'import json;print(json.load(open("'"$CFG"'")).get("currentContext","default"))' 2>/dev/null)
+  if [ -n "$ctx" ] && [ "$ctx" != "default" ] && ! docker context inspect "$ctx" >/dev/null 2>&1; then
+    python3 - "$CFG" <<'PY'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p)); d["currentContext"]="default"
+json.dump(d,open(p,"w"),indent="\t")
+PY
+    echo "gc: reset stale docker context '$ctx' -> default"
+  fi
+fi
+if [ -f "$BX/current" ]; then
+  name=$(python3 -c 'import json;print(json.load(open("'"$BX"'/current")).get("Name",""))' 2>/dev/null)
+  if [ -n "$name" ] && ! DB buildx inspect "$name" >/dev/null 2>&1; then
+    rm -f "$BX/current"
+    echo "gc: cleared stale buildx selection '$name'"
+  fi
+fi
+
+# count by process NAME: `pgrep -f` would also match any shell whose command line
+# merely mentions the string (a lane grepping for it, or this very check), inflating
+# the count and making the surplus rule keep leaks.
+# Thresholds are overridable so the bed can drive each purge branch deterministically
+# (defaults are the production values; 0 disables the age floor and skips the filter,
+# because docker rejects a zero `until=`).
+MIN_AGE=${CHARLY_GC_MIN_AGE:-20m}
+PRESSURE_AGE=${CHARLY_GC_PRESSURE_AGE:-70m}
+PRESSURE_PCT=${CHARLY_GC_PRESSURE_PCT:-80}
+jobs=$(pgrep -xc Runner.Worker 2>/dev/null || true)
+jobs=${jobs:-0}
+use=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+
+# 2. builders whose endpoint socket is gone: their job is gone by construction
+for n in $(builder_names); do
+  # trim: `buildx inspect` pads the endpoint with spaces, and an untrimmed value
+  # makes the -S test false for EVERY builder (measured: it deleted 15 builders
+  # including two live lanes' — the bug that made this rule dangerous).
+  ep=$(DB buildx inspect "$n" 2>/dev/null | awk -F'Endpoint: ' '/Endpoint:/{print $2; exit}' | tr -d " ")
+  sock=${ep#unix://}
+  [ -z "$sock" ] && continue
+  if [ -n "$sock" ] && [ ! -S "$sock" ]; then
+    echo "gc: removing builder '$n' (endpoint gone: $ep)"
+    DB buildx rm --force "$n" >/dev/null 2>&1
+  fi
+done
+
+# 3. surplus builders above the active job count, oldest last-activity first
+while :; do
+  names=$(builder_names)
+  count=$(printf '%s\n' $names | grep -c . || true)
+  [ "${count:-0}" -le "${jobs:-0}" ] && break
+  oldest=$(for n in $names; do [ -f "$BX/activity/$n" ] && stat -c '%Y %n' "$BX/activity/$n"; done | sort -n | head -1 | cut -d' ' -f2-)
+  [ -z "$oldest" ] && break
+  echo "gc: removing surplus builder '$(basename "$oldest")' (builders=$count jobs=$jobs)"
+  DB buildx rm --force "$(basename "$oldest")" >/dev/null 2>&1 || break
+done
+
+# 4. always: age-filtered prune (2h) - cannot touch an in-flight lane
+D container prune -f --filter until=2h >/dev/null 2>&1
+D image prune -af --filter until=2h >/dev/null 2>&1
+D volume prune -af --filter until=2h >/dev/null 2>&1
+D builder prune -af --filter until=2h >/dev/null 2>&1
+
+# 5. idle or under disk pressure: collect everything the finished lanes left
+if [ "${jobs:-0}" -eq 0 ] || [ "${use:-0}" -gt "${PRESSURE_PCT:-80}" ]; then
+  if [ "${jobs:-0}" -eq 0 ]; then
+    # age grace: a job that started between the job-count probe above and this purge
+    # would otherwise lose its containers, so nothing younger than 20 minutes is touched
+    case "$MIN_AGE" in 0|0m|0s) ids=$(D ps -aq);; *) ids=$(D ps -aq --filter "until=$MIN_AGE");; esac
+  else
+    case "$PRESSURE_AGE" in 0|0m|0s) ids=$(D ps -aq);; *) ids=$(D ps -aq --filter "until=$PRESSURE_AGE");; esac
+  fi
+  [ -n "$ids" ] && D rm -f $ids >/dev/null 2>&1
+  rm -f "$BX/current" 2>/dev/null
+  D volume prune -af >/dev/null 2>&1
+  D image prune -af >/dev/null 2>&1
+  D builder prune -af >/dev/null 2>&1
+  echo "gc: collected (jobs=$jobs use=${use}%) -> $(df -h / | tail -1 | awk '{print $4}') free"
+fi
