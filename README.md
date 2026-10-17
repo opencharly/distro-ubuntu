@@ -96,7 +96,8 @@ config schema is newer than the binary supports).
 ## Layout
 
 - `charly.yml` — the root manifest: the `discover:` tree, the inline
-  `check-ubuntu-debootstrap-vm` bed, and the embedded `skill:` entities
+  `check-ubuntu-debootstrap-vm` bed, and the `skill:` entities as **routing
+  metadata only** (their bodies live under `.agents/skills/<name>/SKILL.md`)
   (`ubuntu`, `ubuntu-builder`, `ubuntu-coder`, `ubuntu-debootstrap`,
   `ubuntu-debootstrap-builder`).
 - `box/<name>/charly.yml` — one manifest per image / builder / VM box.
