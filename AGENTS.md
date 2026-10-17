@@ -9,9 +9,13 @@ embedded in the `charly` binary (`charly/charly.yml`). Ubuntu is deb-family:
 Canonical files:
 
 - `charly.yml` — the root manifest: the `discover:` tree, the inline
-  `check-ubuntu-debootstrap-vm` bed, and the embedded `skill:` entities
+  `check-ubuntu-debootstrap-vm` bed, and the `skill:` entities
   (`ubuntu`, `ubuntu-builder`, `ubuntu-coder`, `ubuntu-debootstrap`,
-  `ubuntu-debootstrap-builder`).
+  `ubuntu-debootstrap-builder`, `githubrunner-ubuntu`) as **routing metadata
+  only** — `name`, `family`, `owner` and the `triggers:` that generate the
+  dispatcher rows. Their bodies are authored content and live under
+  `.agents/skills/<name>/SKILL.md`; five of the six carry `triggers:`, and
+  `ubuntu-debootstrap-builder` does not.
 - `box/<name>/charly.yml` — one manifest per image / builder / VM box.
 - `.github/workflows/tag-on-merge.yml` — CalVer tag + `CHANGELOG/` on merge.
 - `README.md` — user overview only; never agent guidance.
@@ -40,9 +44,10 @@ Canonical files:
 
 ## Modify this repo
 
-- Edit the box manifest under `box/<name>/charly.yml` and any embedded `skill:`
-  entity together — the skill is the projected usage source, so a change not
-  mirrored in the skill leaves the corpus stale.
+- Edit the box manifest under `box/<name>/charly.yml`, the skill's routing node
+  in the root `charly.yml`, and the skill's body under
+  `.agents/skills/<name>/SKILL.md` together — the body is the projected usage
+  source, so a change not mirrored in it leaves the corpus stale.
 - This repo carries no candies of its own; a new layer belongs in its own
   `layer-*` repo and is referenced here by a pinned `@github` ref.
 - Preserve the adopt-mode `ubuntu:ubuntu` identity: `${USER}`/`${HOME}` differ
