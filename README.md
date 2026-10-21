@@ -96,10 +96,14 @@ config schema is newer than the binary supports).
 ## Layout
 
 - `charly.yml` — the root manifest: the `discover:` tree, the inline
-  `check-ubuntu-debootstrap-vm` bed, and the `skill:` entities as **routing
-  metadata only** (their bodies live under `.agents/skills/<name>/SKILL.md`)
-  (`ubuntu`, `ubuntu-builder`, `ubuntu-coder`, `ubuntu-debootstrap`,
-  `ubuntu-debootstrap-builder`, `githubrunner-ubuntu`).
+  `check-ubuntu-debootstrap-vm` bed, and the `githubrunner-ubuntu` `skill:`
+  entity as **routing metadata only** (its body lives beside the
+  `github-runner-ubuntu` candy that owns it).
+- `candy/ubuntu-skills/charly.yml` — the `ubuntu-skills` bundle candy: the five
+  `skill:` entities an IMAGE may not own (opencharly/sdk#434) — `ubuntu`,
+  `ubuntu-builder`, `ubuntu-coder`, `ubuntu-debootstrap`,
+  `ubuntu-debootstrap-builder` — composed into every image that carries one of
+  them, with the bodies beside it under `.agents/skills/<name>/SKILL.md`.
 - `box/<name>/charly.yml` — one manifest per image / builder / VM box.
 - `.github/workflows/tag-on-merge.yml` — CalVer tag + `CHANGELOG/` on merge.
 - `README.md` — this user overview.

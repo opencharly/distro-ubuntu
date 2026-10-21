@@ -745,40 +745,10 @@ githubrunner-ubuntu-skill:
     skill:
         name: githubrunner-ubuntu
         family: distros
-        owner: githubrunner-ubuntu
+        # The skill teaches the `githubrunner-ubuntu` VM, whose recipe IS the
+        # `github-runner-ubuntu` candy (extracted from that entity as cloud-init,
+        # opencharly/distro-ubuntu#37). A VM has no source directory, so a candy owns it.
+        owner: github-runner-ubuntu
         triggers:
             - "The CI-runner Ubuntu VM / `githubrunner-ubuntu` / the `check-githubrunner-ubuntu-vm` bed"
             - "A CI lane failing on a self-hosted Ubuntu runner (docker daemon, disk, buildx builder)"
-ubuntu-builder-skill:
-    skill:
-        name: ubuntu-builder
-        family: distros
-        owner: ubuntu-builder
-        triggers:
-            - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
-ubuntu-coder-skill:
-    skill:
-        name: ubuntu-coder
-        family: coder
-        owner: ubuntu-coder
-        triggers:
-            - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
-ubuntu-debootstrap-builder-skill:
-    skill:
-        name: ubuntu-debootstrap-builder
-        family: distros
-        owner: ubuntu-debootstrap-builder
-ubuntu-debootstrap-skill:
-    skill:
-        name: ubuntu-debootstrap
-        family: distros
-        owner: ubuntu-debootstrap
-        triggers:
-            - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
-ubuntu-skill:
-    skill:
-        name: ubuntu
-        family: distros
-        owner: ubuntu
-        triggers:
-            - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"

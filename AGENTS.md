@@ -9,13 +9,24 @@ embedded in the `charly` binary (`charly/charly.yml`). Ubuntu is deb-family:
 Canonical files:
 
 - `charly.yml` — the root manifest: the `discover:` tree, the inline
-  `check-ubuntu-debootstrap-vm` bed, and the `skill:` entities
-  (`ubuntu`, `ubuntu-builder`, `ubuntu-coder`, `ubuntu-debootstrap`,
-  `ubuntu-debootstrap-builder`, `githubrunner-ubuntu`) as **routing metadata
-  only** — `name`, `family`, `owner` and the `triggers:` that generate the
-  dispatcher rows. Their bodies are authored content and live under
-  `.agents/skills/<name>/SKILL.md`; five of the six carry `triggers:`, and
-  `ubuntu-debootstrap-builder` does not.
+  `check-ubuntu-debootstrap-vm` bed, and ONE `skill:` entity
+  (`githubrunner-ubuntu`, owned by the `github-runner-ubuntu` candy that is the
+  `githubrunner-ubuntu` VM's extracted payload) as **routing metadata only**.
+- `candy/ubuntu-skills/charly.yml` — the `ubuntu-skills` bundle candy PLUS the
+  five `skill:` entities whose only other owner was an image (`ubuntu`,
+  `ubuntu-builder`, `ubuntu-coder`, `ubuntu-debootstrap`,
+  `ubuntu-debootstrap-builder`), each with `owner: ubuntu-skills`. A skill's
+  `owner:` must be a CANDY: an image is a `candy:` node carrying
+  `base:`/`from:`, so it has no source directory, its skill's prose can never be
+  read and the node never reaches the `ai.opencharly.skill` label
+  (opencharly/sdk#434). The candy is composed into every image that carries one
+  of those skills.
+- `<owning candy>/.agents/skills/<name>/SKILL.md` — the six skill BODIES, one
+  directory per entity's `name:`, BESIDE the candy that owns it
+  (`candy/ubuntu-skills/` for five, `candy/github-runner-ubuntu/` for
+  `githubrunner-ubuntu`). The files are the source of record for the prose; five
+  of the six entities carry `triggers:`, and `ubuntu-debootstrap-builder` does
+  not.
 - `box/<name>/charly.yml` — one manifest per image / builder / VM box.
 - `.github/workflows/tag-on-merge.yml` — CalVer tag + `CHANGELOG/` on merge.
 - `README.md` — user overview only; never agent guidance.
@@ -45,11 +56,14 @@ Canonical files:
 ## Modify this repo
 
 - Edit the box manifest under `box/<name>/charly.yml`, the skill's routing node
-  in the root `charly.yml`, and the skill's body under
-  `.agents/skills/<name>/SKILL.md` together — the body is the projected usage
-  source, so a change not mirrored in it leaves the corpus stale.
-- This repo carries no candies of its own; a new layer belongs in its own
-  `layer-*` repo and is referenced here by a pinned `@github` ref.
+  in its OWNING candy's `charly.yml`, and the skill's body under that candy's
+  `.agents/skills/<name>/` together — the body is the projected usage source, so
+  a change not mirrored in it leaves the corpus stale.
+- This repo carries two candies of its own: `github-runner-ubuntu` (the CI-runner
+  recipe) and `ubuntu-skills` (the skill-prose bundle that exists because a
+  `skill:` owner must be a candy, opencharly/sdk#434). Any other new layer
+  belongs in its own `layer-*` repo and is referenced here by a pinned `@github`
+  ref.
 - Preserve the adopt-mode `ubuntu:ubuntu` identity: `${USER}`/`${HOME}` differ
   from the other deb-based boxes (`ubuntu-coder` → `ubuntu:/home/ubuntu`;
   `debian-coder` → `user:/home/user`).
