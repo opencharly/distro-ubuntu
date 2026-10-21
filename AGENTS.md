@@ -21,12 +21,14 @@ Canonical files:
   read and the node never reaches the `ai.opencharly.skill` label
   (opencharly/sdk#434). The candy is composed into every image that carries one
   of those skills.
-- `<owning candy>/.agents/skills/<name>/SKILL.md` — the six skill BODIES, one
-  directory per entity's `name:`, BESIDE the candy that owns it
-  (`candy/ubuntu-skills/` for five, `candy/github-runner-ubuntu/` for
-  `githubrunner-ubuntu`). The files are the source of record for the prose; five
-  of the six entities carry `triggers:`, and `ubuntu-debootstrap-builder` does
-  not.
+- `.agents/skills/<name>/SKILL.md` — the six skill BODIES, one directory per
+  entity's `name:`, at THIS REPO'S ROOT — never in a candy directory. The root
+  is the directory a harness rooted here discovers natively and the base the
+  marketplace corpus reads, so the corpus and the `ai.opencharly.skill` label
+  name the same file (`deploykit.candyRepoRoot`, opencharly/sdk#445). Five of the
+  bodies belong to `ubuntu-skills`, one to `github-runner-ubuntu`. The files are
+  the source of record for the prose; five of the six entities carry
+  `triggers:`, and `ubuntu-debootstrap-builder` does not.
 - `box/<name>/charly.yml` — one manifest per image / builder / VM box.
 - `.github/workflows/tag-on-merge.yml` — CalVer tag + `CHANGELOG/` on merge.
 - `README.md` — user overview only; never agent guidance.
@@ -56,9 +58,9 @@ Canonical files:
 ## Modify this repo
 
 - Edit the box manifest under `box/<name>/charly.yml`, the skill's routing node
-  in its OWNING candy's `charly.yml`, and the skill's body under that candy's
-  `.agents/skills/<name>/` together — the body is the projected usage source, so
-  a change not mirrored in it leaves the corpus stale.
+  in its OWNING candy's `charly.yml`, and the skill's body at the repo root
+  (`.agents/skills/<name>/`) together — the body is the projected usage source,
+  so a change not mirrored in it leaves the corpus stale.
 - This repo carries two candies of its own: `github-runner-ubuntu` (the CI-runner
   recipe) and `ubuntu-skills` (the skill-prose bundle that exists because a
   `skill:` owner must be a candy, opencharly/sdk#434). Any other new layer
