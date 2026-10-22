@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# charly-register-runners — register (or remove) this guest's GitHub Actions runners.
+#
+# Shipped by the `github-runner-ubuntu` candy, which installs the runner TREE at
+# /home/ubuntu/actions-runner-base but never registers it: a registration token lives one
+# hour and is never committed. This is the one operator entry point, and it replaces the
+# four hand-run `config.sh` incantations that were tied to a hardcoded org, name and count.
+#
+# Why not a candy `post_enable` hook (the pod-github-runner precedent): measured at
+# opencharly/charly — only plugin-deploy-pod executes candy lifecycle hooks; the vm and
+# kubevirt deploy plugins do not. A hook here would be dead code on the substrate this
+# recipe targets. Registration therefore stays an explicit, token-guarded step, and the
+# substrate hook gap is tracked separately.
+#
+# Usage (as root, on the guest):
+#   RUNNER_URL=https://github.com/opencharly/crabbox RUNNER_TOKEN="$TOKEN" \
+#     RUNNER_LABELS=ubuntu-latest RUNNER_NAME_PREFIX=charly-ci-crabbox \
+#     charly-register-runners
+#   RUNNER_ORG=opencharly RUNNER_TOKEN="$TOKEN" charly-register-runners   # org scope
+#
+# SCOPE IS THE CALLER'S CHOICE, and it is the security boundary. A REPO-scoped runner
+# (RUNNER_URL=https://github.com/<owner>/<repo>) serves only that repository — which is
+# what makes naming a GitHub-hosted label (`ubuntu-latest`) safe: the runner can never be
+# selected by another repo's job. An ORG-scoped runner with a hosted label would be
+# matched by every repo in the org, so use org scope with a DISTINCT label only.
+#
+# Env:
+#   RUNNER_URL          repo scope, e.g. https://github.com/owner/repo
+#   RUNNER_ORG          org scope shorthand, e.g. opencharly (ignored when RUNNER_URL is set)
+#   RUNNER_TOKEN        required — registration token, or a REMOVE token for --remove
+#   RUNNER_LABELS       default opencharly
+#   RUNNER_GROUP        optional org runner group (`--runnergroup`); unset = Default
+#   RUNNER_NAME_PREFIX  default charly-githubrunner-ubuntu (names are <prefix>-<n>)
+#   RUNNER_COUNT        default 4
+#   RUNNER_USER         default ubuntu (the runner user and home owner)
+set -euo pipefail
+
+MODE="register"
+case "${1:-}" in
+  ""|register) ;;
+  --remove|remove) MODE="remove" ;;
+  -h|--help)
+    sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0
+    ;;
+  *)
+    echo "usage: $0 [register|--remove]" >&2
+    exit 2
+    ;;
+esac
+
+if [ -z "${RUNNER_URL:-}" ] && [ -n "${RUNNER_ORG:-}" ]; then
+  RUNNER_URL="https://github.com/${RUNNER_ORG}"
+fi
+: "${RUNNER_URL:?RUNNER_URL (or RUNNER_ORG) is required, e.g. https://github.com/opencharly/crabbox}"
+if [ -z "${RUNNER_TOKEN:-}" ]; then
+  echo "RUNNER_TOKEN empty — nothing to ${MODE}" >&2
+  exit 0
+fi
+
+RUNNER_USER="${RUNNER_USER:-ubuntu}"
+RUNNER_HOME="${RUNNER_HOME:-/home/${RUNNER_USER}}"
+RUNNER_LABELS="${RUNNER_LABELS:-opencharly}"
+RUNNER_GROUP="${RUNNER_GROUP:-}"
+RUNNER_NAME_PREFIX="${RUNNER_NAME_PREFIX:-charly-githubrunner-ubuntu}"
+RUNNER_COUNT="${RUNNER_COUNT:-4}"
+BASE="${RUNNER_HOME}/actions-runner-base"
+RUNNERS="${RUNNER_HOME}/actions-runner"
+
+case "$RUNNER_COUNT" in
+  ''|*[!0-9]*) echo "RUNNER_COUNT must be a positive integer, got '${RUNNER_COUNT}'" >&2; exit 2 ;;
+esac
+if [ "$RUNNER_COUNT" -lt 1 ]; then
+  echo "RUNNER_COUNT must be at least 1" >&2
+  exit 2
+fi
+
+as_user() {
+  if [ "$(id -un)" = "$RUNNER_USER" ]; then
+    "$@"
+  else
+    sudo -u "$RUNNER_USER" "$@"
+  fi
+}
+
+# The unit name `svc.sh install` writes is actions.runner.<scope>.<runner-name>.service,
+# where scope is the org, or `owner-repo` for a repository-scoped runner.
+scope="${RUNNER_URL#https://github.com/}"
+scope="${scope%/}"
+scope="${scope//\//-}"
+
+i=1
+while [ "$i" -le "$RUNNER_COUNT" ]; do
+  dir="${RUNNERS}/${i}"
+  name="${RUNNER_NAME_PREFIX}-${i}"
+  unit="actions.runner.${scope}.${name}.service"
+
+  if [ "$MODE" = "register" ]; then
+    as_user mkdir -p "$dir"
+    if [ ! -f "${dir}/config.sh" ]; then
+      as_user cp -a "${BASE}/." "$dir/"
+    fi
+    # `.runner` is the runner's own registration record: presence means "already
+    # registered", which makes a re-run idempotent instead of a --replace churn.
+    if [ -f "${dir}/.runner" ]; then
+      echo "runner ${i} (${name}) already registered"
+    else
+      group_args=()
+      if [ -n "$RUNNER_GROUP" ]; then
+        group_args=(--runnergroup "$RUNNER_GROUP")
+      fi
+      as_user "${dir}/config.sh" --unattended \
+        --url "${RUNNER_URL}" \
+        --token "${RUNNER_TOKEN}" \
+        --name "${name}" \
+        --labels "${RUNNER_LABELS}" \
+        ${group_args[@]+"${group_args[@]}"} \
+        --replace --work _work
+    fi
+    if [ ! -f "/etc/systemd/system/${unit}" ]; then
+      ( cd "$dir" && ./svc.sh install "$RUNNER_USER" )
+    fi
+    systemctl enable --now "$unit"
+    echo "runner ${i} (${name}): $(systemctl is-active "$unit")"
+  else
+    if [ -f "${dir}/.runner" ]; then
+      ( cd "$dir" && as_user ./config.sh remove --token "${RUNNER_TOKEN}" ) || true
+    fi
+    systemctl disable --now "$unit" 2>/dev/null || true
+    echo "runner ${i} (${name}) removed"
+  fi
+  i=$((i + 1))
+done

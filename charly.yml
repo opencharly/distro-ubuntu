@@ -169,7 +169,12 @@ githubrunner-ubuntu-vmi:
         # why data_volume+http cannot be used on this cluster).
         source:
             kind: container_disk
-            image: ttl.sh/charly-githubrunner-ubuntu-disk:6h
+            # A DURABLE, PUBLIC ref. It replaces `ttl.sh/…:6h`, which expires by design and
+            # made this leg impossible to reproduce from the committed tree (the previous
+            # build is gone within hours). Rebuild and republish with:
+            #   charly vm build githubrunner-ubuntu-disk --container-disk \
+            #     --push ghcr.io/opencharly/githubrunner-ubuntu-disk:<CalVer>
+            image: ghcr.io/opencharly/githubrunner-ubuntu-disk:2026.295.0418
             pull_policy: Always
             disk_path_in_image: /disk/disk.img
         run_strategy: Always
@@ -349,10 +354,11 @@ check-githubrunner-ubuntu-vm:
               id: socket-and-per-runner-docker-host
               description: |
                 The shared socket path lanes hardcode or mount resolves to the co-tenant-safe
-                daemon, and all four runner instances carry DOCKER_HOST to that daemon's own
-                socket — which is what makes a lane's relink of the shared symlink unable to
-                redirect its co-tenants. Both halves are needed: the symlink alone would be
-                hijackable, the drop-ins alone would break the tests that mount the path.
+                daemon, and the runner tree carries NO DOCKER_HOST override, so a job sees the
+                same default socket a GitHub-hosted runner does and the tests that mount
+                /var/run/docker.sock keep working. The override was removed after measurement:
+                with DOCKER_HOST set, `TestCreateContainerCanMountDockerSocket` stopped
+                mounting the socket and the scope test classified the engine as podman.
               stdout:
                 - contains: SOCKET-AND-DOCKER-HOST-OK
               exit_status: 0
@@ -360,8 +366,8 @@ check-githubrunner-ubuntu-vm:
                 - runtime
               command: |
                 test "$(readlink /var/run/docker.sock)" = /run/docker-ci.sock &&
-                DOCKER_HOST=unix:///run/docker-ci.sock docker version --format '{{.Server.Version}}' >/dev/null &&
-                test "$(grep -l 'DOCKER_HOST=unix:///run/docker-ci.sock' /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-*.service.d/docker-host.conf | wc -l)" = 4 &&
+                docker version --format '{{.Server.Version}}' >/dev/null &&
+                ! grep -q '^DOCKER_HOST=' /home/ubuntu/actions-runner-base/.env 2>/dev/null &&
                 printf 'SOCKET-AND-DOCKER-HOST-OK\n'
             - check: a co-tenant keeps a live daemon through DOCKER_HOST while a lane mutates the shared socket
               id: cotenant-isolation-under-lane-mutation
@@ -450,23 +456,23 @@ check-githubrunner-ubuntu-vm:
                 test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 0 &&
                 printf 'UNPRIVILEGED-USERNS-OK\n'
             - check: the runner tree and both exact label sets are in place for token-guarded registration
-              id: runner-tree-and-labels-ready
+              id: runner-tree-and-registration-ready
               description: |
-                The runner tree the token-guarded registration copies, plus the exact label
-                sets: the three blacksmith-* labels the fork's CI hardcodes in `runs-on:`
-                (no Blacksmith app exists in the org) and the org-only set for the runners
-                kept off the heavy pool. Registration itself is deliberately NOT done here —
-                a registration token lives one hour and is never committed.
+                The runner tree the token-guarded registration copies, and the ONE registration
+                script that copies it. The label set is no longer a file on the guest: it is
+                `RUNNER_LABELS` passed to the script, so there is exactly one source and it
+                cannot drift from the registration command. Registration itself is deliberately
+                NOT done here — a registration token lives one hour and is never committed.
               stdout:
-                - contains: RUNNER-TREE-AND-LABELS-OK
+                - contains: RUNNER-TREE-AND-REGISTRATION-OK
               exit_status: 0
               context:
                 - runtime
               command: |
                 test -x /home/ubuntu/actions-runner-base/config.sh &&
-                test "$(cat /etc/charly-runner-labels)" = 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vcpu-ubuntu-2404,blacksmith-32vcpu-ubuntu-2404' &&
-                test "$(cat /etc/charly-runner-labels-org)" = opencharly &&
-                printf 'RUNNER-TREE-AND-LABELS-OK\n'
+                test -x /usr/local/sbin/charly-register-runners &&
+                /usr/local/sbin/charly-register-runners --help >/dev/null &&
+                printf 'RUNNER-TREE-AND-REGISTRATION-OK\n'
             - check: both hygiene timers are active, the journal is capped, the disk is the 128 GiB one and swap is on
               id: resources-and-timers
               description: |
