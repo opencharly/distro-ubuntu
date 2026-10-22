@@ -251,6 +251,15 @@ ci-runner-vmi-2:
             - github-runner-ubuntu
         lifecycle: prod
 
+# A third VM keeps a full CI wave (20 jobs) inside two rounds: measured 7 of 8 runners
+# busy during one PR run, with the KubeVirt nodes at 0-13 % CPU and 3-25 % memory.
+ci-runner-vmi-3:
+    kubevirt:
+        from: githubrunner-ubuntu-vmi
+        add_candy:
+            - github-runner-ubuntu
+        lifecycle: prod
+
 # The libvirt substrate — needs no registry at all, because the vm substrate BUILDS the
 # disk it boots.
 ci-runner-vm-1:
