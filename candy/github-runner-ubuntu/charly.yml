@@ -244,7 +244,7 @@ github-runner-ubuntu:
                   apt-get install -y -qq --no-install-recommends \
                     git libdigest-sha-perl nodejs npm gh build-essential skopeo \
                     python3-pip python3-venv unzip zip tree moreutils \
-                    bc less lsof strace netcat-openbsd dnsutils ripgrep
+                    bc less lsof strace netcat-openbsd dnsutils ripgrep ruby
             - run: "step 9 \u2014 usermod -aG docker ubuntu"
               id: "cmd-09-usermod-ag-docker-ubuntu"
               run_as: root
