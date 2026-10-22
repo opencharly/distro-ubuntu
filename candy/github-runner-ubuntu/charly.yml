@@ -237,8 +237,14 @@ github-runner-ubuntu:
                   # Scripts job failed with `unknown option: --no-lazy-fetch`.
                   add-apt-repository -y ppa:git-core/ppa
                   apt-get update -qq
+                  # The full hosted-parity job toolchain. These were declared in
+                  # `distro.ubuntu.package:` (BUILD scope) and therefore never reached a
+                  # prebuilt-disk deploy — measured: pip3, unzip, zip, tree and moreutils
+                  # were all absent from a live runner VM.
                   apt-get install -y -qq --no-install-recommends \
-                    git libdigest-sha-perl nodejs npm gh build-essential skopeo
+                    git libdigest-sha-perl nodejs npm gh build-essential skopeo \
+                    python3-pip python3-venv unzip zip tree moreutils \
+                    bc less lsof strace netcat-openbsd dnsutils ripgrep
             - run: "step 9 \u2014 usermod -aG docker ubuntu"
               id: "cmd-09-usermod-ag-docker-ubuntu"
               run_as: root
@@ -449,6 +455,16 @@ github-runner-ubuntu:
               command: |
                   set -euo pipefail
                   gh --version
+            - check: pip3 and the archive tools are present
+              id: check-job-toolchain
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  pip3 --version
+                  unzip -v >/dev/null
+                  zip -v >/dev/null
+                  tree --version >/dev/null
             - check: skopeo is installed and reports its version
               id: check-skopeo
               run_as: root
