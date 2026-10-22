@@ -45,6 +45,15 @@ github-runner-ubuntu:
                     - slirp4netns
                     - uidmap
                     - fuse-overlayfs
+                    # HOSTED-RUNNER PARITY. GitHub-hosted images preinstall node/npm and
+                    # gh, and workflows written for them call those directly without a
+                    # setup action. Measured on the fleet: the crabbox Docs job failed with
+                    # `node: command not found` (exit 127), and any `gh api` step would fail
+                    # the same way. Go is deliberately NOT here: every workflow that needs
+                    # it uses actions/setup-go, which downloads the pinned toolchain.
+                    - nodejs
+                    - npm
+                    - gh
                     # skopeo: the enterprise container validations install it with
                     # `sudo apt-get`, which this image cannot do (no passwordless sudo).
                     # Shipping it makes the capability present so those jobs can assert
