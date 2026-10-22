@@ -337,6 +337,32 @@ github-runner-ubuntu:
             # non-default host and stopped mounting `/var/run/docker.sock`, and the scope
             # test classified the engine as podman. The four per-unit drop-ins this recipe
             # used to carry had the same effect and were removed for the same reason.
+            #
+            # A WARM GO CACHE, SHARED BY THIS VM's runners. The org's workflows pin
+            # `cache: false` for setup-go, so every job otherwise re-downloads the module
+            # graph and recompiles the world; four runners per VM sharing one build/module
+            # cache turns the second and later jobs on that VM warm. Go's build cache is
+            # safe to share across concurrent builds. This is runner-side state (never a
+            # DOCKER_HOST or any other value that changes what a job observes), written to
+            # the runner tree's `.env`, which the Actions runner sources at start.
+            - run: "create the shared Go cache directories"
+              id: "go-cache-dirs"
+              run_as: root
+              context: [deploy]
+              command: |
+                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go
+                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/build
+                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/mod
+                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/path
+            - run: "write the runner .env with the shared Go cache paths"
+              id: "file-runner-go-env"
+              write: "/home/ubuntu/actions-runner-base/.env"
+              run_as: ubuntu
+              mode: "0644"
+              content: |
+                  GOPATH=/var/cache/charly/go/path
+                  GOCACHE=/var/cache/charly/go/build
+                  GOMODCACHE=/var/cache/charly/go/mod
             # The label set used to live in two files (`/etc/charly-runner-labels` and
             # `-org`), a second source that could drift from the registration command.
             # `charly-register-runners` takes `RUNNER_LABELS` directly, so the files are
@@ -380,6 +406,15 @@ github-runner-ubuntu:
             # this asserts the exact line rather than the file's existence: a stale value
             # (the old default /var/run/docker.sock) would pass an existence check and
             # still send every lane to the wrong daemon.
+            - check: the runner .env points Go at the VM's shared build/module cache
+              id: check-go-cache-env
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  grep -qx 'GOCACHE=/var/cache/charly/go/build' /home/ubuntu/actions-runner-base/.env
+                  grep -qx 'GOMODCACHE=/var/cache/charly/go/mod' /home/ubuntu/actions-runner-base/.env
+                  test -d /var/cache/charly/go/build
             - check: the runner tree carries NO DOCKER_HOST override, so jobs see the default socket
               id: check-no-docker-host-override
               run_as: root
