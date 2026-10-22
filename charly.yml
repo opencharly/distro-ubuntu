@@ -240,6 +240,17 @@ ci-runner-vmi-1:
             - github-runner-ubuntu
         lifecycle: prod
 
+# The second KubeVirt runner VM. The fleet lives on the cluster, not on the libvirt host:
+# the cluster has idle capacity and per-VM cores are real (once plugin-kubevirt#41 lands —
+# before it, a 16-core template ran on one core), while the libvirt host is a 16-core box
+# whose CI VM competes with its own guests.
+ci-runner-vmi-2:
+    kubevirt:
+        from: githubrunner-ubuntu-vmi
+        add_candy:
+            - github-runner-ubuntu
+        lifecycle: prod
+
 # The libvirt substrate — needs no registry at all, because the vm substrate BUILDS the
 # disk it boots.
 ci-runner-vm-1:
