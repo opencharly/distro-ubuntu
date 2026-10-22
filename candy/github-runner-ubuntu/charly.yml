@@ -237,14 +237,22 @@ github-runner-ubuntu:
                   # Scripts job failed with `unknown option: --no-lazy-fetch`.
                   add-apt-repository -y ppa:git-core/ppa
                   apt-get update -qq
-                  # The full hosted-parity job toolchain. These were declared in
-                  # `distro.ubuntu.package:` (BUILD scope) and therefore never reached a
-                  # prebuilt-disk deploy — measured: pip3, unzip, zip, tree and moreutils
-                  # were all absent from a live runner VM.
+                  # The full hosted-parity job toolchain, INCLUDING Chromium's runtime set.
+                  # These are declared in `distro.ubuntu.package:` for image builds, but that
+                  # is BUILD scope and never reaches a prebuilt-disk deploy — measured: pip3,
+                  # unzip, zip, tree, moreutils AND every Chromium package were absent from a
+                  # live KubeVirt runner. The list below is what a prebuilt-disk deploy gets;
+                  # `check-chromium-runtime` would otherwise fail on the very substrate this
+                  # recipe targets.
                   apt-get install -y -qq --no-install-recommends \
                     git libdigest-sha-perl nodejs npm gh build-essential skopeo \
                     python3-pip python3-venv unzip zip tree moreutils \
-                    bc less lsof strace netcat-openbsd dnsutils ripgrep ruby
+                    bc less lsof strace netcat-openbsd dnsutils ripgrep ruby \
+                    libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 \
+                    libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+                    libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
+                    libatspi2.0-0t64 libx11-6 libxcb1 libxext6 libglib2.0-0t64 \
+                    fonts-liberation fonts-unifont
             - run: "step 9 \u2014 usermod -aG docker ubuntu"
               id: "cmd-09-usermod-ag-docker-ubuntu"
               run_as: root
