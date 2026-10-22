@@ -169,7 +169,12 @@ githubrunner-ubuntu-vmi:
         # why data_volume+http cannot be used on this cluster).
         source:
             kind: container_disk
-            image: ttl.sh/charly-githubrunner-ubuntu-disk:6h
+            # A DURABLE, PUBLIC ref. It replaces `ttl.sh/…:6h`, which expires by design and
+            # made this leg impossible to reproduce from the committed tree (the previous
+            # build is gone within hours). Rebuild and republish with:
+            #   charly vm build githubrunner-ubuntu-disk --container-disk \
+            #     --push ghcr.io/opencharly/githubrunner-ubuntu-disk:<CalVer>
+            image: ghcr.io/opencharly/githubrunner-ubuntu-disk:2026.295.0418
             pull_policy: Always
             disk_path_in_image: /disk/disk.img
         run_strategy: Always
@@ -195,6 +200,54 @@ githubrunner-ubuntu-vmi:
             check-githubrunner-ubuntu-vmi, which composes candy/github-runner-ubuntu through
             add_candy. It cannot be composed here: a venue-bearing kubevirt node is classified as
             a template by the loader, and templates reject add_candy.
+
+# The production CI fleet. ONE deploy per VM; the VM hosts RUNNER_COUNT runner services.
+# Deliberately NOT `disposable: true` — this is a long-lived runner, so no autonomous
+# destroy/rebuild. Registration is the one operator step (a token lives one hour):
+#
+#   TOKEN=$(gh api -X POST /orgs/opencharly/actions/runners/registration-token --jq .token)
+#   charly config ubuntu.ci-runner-vm-1
+#   charly start  ubuntu.ci-runner-vm-1
+#   charly shell  ubuntu.ci-runner-vm-1 -c \
+#     'sudo env RUNNER_ORG=opencharly RUNNER_TOKEN='"$TOKEN"' \
+#        RUNNER_LABELS=ubuntu-latest,opencharly \
+#        RUNNER_NAME_PREFIX=charly-ci RUNNER_COUNT=4 \
+#        /usr/local/sbin/charly-register-runners'
+#
+# ORG SCOPE + THE HOSTED LABEL IS THE POINT: every repository in the org whose workflow
+# already says `runs-on: ubuntu-latest` (and every workflow pinned by `@github` refs) uses
+# this fleet with NO workflow edit. `opencharly` stays as the distinct routing label the
+# org's own CI and the pr-validator select through vars.CI_RUNNER_LABEL /
+# vars.REVIEW_RUNNER_LABEL.
+#
+# The blast radius is stated, not hidden: an org-scoped runner carrying a hosted-runner
+# label is matched by EVERY repository in the org (the `runs-on` docs warn about exactly
+# this). That is the intended consumption model here — the Default runner group has
+# `visibility: all` and `allows_public_repositories: true` — and it means CI jobs from
+# public repos execute on this host. Narrow it with a runner group (`RUNNER_GROUP`) and a
+# repo selection if that trade is ever no longer wanted.
+#
+# Not claimed: `windows-latest` and `xcode-27` (no Windows/macOS capacity exists), and
+# `blacksmith-2vcpu-ubuntu-2404` (only the Blacksmith testbox workflow names it, and that
+# workflow needs Blacksmith's own actions). Those jobs stay unsupported, visibly.
+# The same fleet on the KubeVirt substrate. It boots the published containerDisk, which is
+# now a durable PUBLIC ref (verified by an anonymous pull), so the cluster needs no
+# imagePullSecret.
+ci-runner-vmi-1:
+    kubevirt:
+        from: githubrunner-ubuntu-vmi
+        add_candy:
+            - github-runner-ubuntu
+        lifecycle: prod
+
+# The libvirt substrate — needs no registry at all, because the vm substrate BUILDS the
+# disk it boots.
+ci-runner-vm-1:
+    vm:
+        from: githubrunner-ubuntu
+        add_candy:
+            - github-runner-ubuntu
+        lifecycle: prod
 
 # The KubeVirt bed. Unlike the libvirt bed this does NOT restate the recipe: it composes the
 # SAME candy onto the SAME entity through add_candy, which is what makes one recipe serve both
@@ -349,10 +402,12 @@ check-githubrunner-ubuntu-vm:
               id: socket-and-per-runner-docker-host
               description: |
                 The shared socket path lanes hardcode or mount resolves to the co-tenant-safe
-                daemon, and all four runner instances carry DOCKER_HOST to that daemon's own
-                socket — which is what makes a lane's relink of the shared symlink unable to
-                redirect its co-tenants. Both halves are needed: the symlink alone would be
-                hijackable, the drop-ins alone would break the tests that mount the path.
+                daemon, and the runner tree carries DOCKER_HOST to that daemon's own socket —
+                which is what makes a lane's relink of the shared symlink unable to redirect
+                its co-tenants. Both halves are needed: the symlink alone would be hijackable,
+                the .env alone would break the tests that mount the path. The assertion is the
+                ONE .env every runner is copied from, not four per-unit drop-ins: those named a
+                hardcoded org/prefix/four-unit set and did not exist before registration.
               stdout:
                 - contains: SOCKET-AND-DOCKER-HOST-OK
               exit_status: 0
@@ -361,7 +416,7 @@ check-githubrunner-ubuntu-vm:
               command: |
                 test "$(readlink /var/run/docker.sock)" = /run/docker-ci.sock &&
                 DOCKER_HOST=unix:///run/docker-ci.sock docker version --format '{{.Server.Version}}' >/dev/null &&
-                test "$(grep -l 'DOCKER_HOST=unix:///run/docker-ci.sock' /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-*.service.d/docker-host.conf | wc -l)" = 4 &&
+                grep -qx 'DOCKER_HOST=unix:///run/docker-ci.sock' /home/ubuntu/actions-runner-base/.env &&
                 printf 'SOCKET-AND-DOCKER-HOST-OK\n'
             - check: a co-tenant keeps a live daemon through DOCKER_HOST while a lane mutates the shared socket
               id: cotenant-isolation-under-lane-mutation
@@ -450,23 +505,23 @@ check-githubrunner-ubuntu-vm:
                 test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 0 &&
                 printf 'UNPRIVILEGED-USERNS-OK\n'
             - check: the runner tree and both exact label sets are in place for token-guarded registration
-              id: runner-tree-and-labels-ready
+              id: runner-tree-and-registration-ready
               description: |
-                The runner tree the token-guarded registration copies, plus the exact label
-                sets: the three blacksmith-* labels the fork's CI hardcodes in `runs-on:`
-                (no Blacksmith app exists in the org) and the org-only set for the runners
-                kept off the heavy pool. Registration itself is deliberately NOT done here —
-                a registration token lives one hour and is never committed.
+                The runner tree the token-guarded registration copies, and the ONE registration
+                script that copies it. The label set is no longer a file on the guest: it is
+                `RUNNER_LABELS` passed to the script, so there is exactly one source and it
+                cannot drift from the registration command. Registration itself is deliberately
+                NOT done here — a registration token lives one hour and is never committed.
               stdout:
-                - contains: RUNNER-TREE-AND-LABELS-OK
+                - contains: RUNNER-TREE-AND-REGISTRATION-OK
               exit_status: 0
               context:
                 - runtime
               command: |
                 test -x /home/ubuntu/actions-runner-base/config.sh &&
-                test "$(cat /etc/charly-runner-labels)" = 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vcpu-ubuntu-2404,blacksmith-32vcpu-ubuntu-2404' &&
-                test "$(cat /etc/charly-runner-labels-org)" = opencharly &&
-                printf 'RUNNER-TREE-AND-LABELS-OK\n'
+                test -x /usr/local/sbin/charly-register-runners &&
+                /usr/local/sbin/charly-register-runners --help >/dev/null &&
+                printf 'RUNNER-TREE-AND-REGISTRATION-OK\n'
             - check: both hygiene timers are active, the journal is capped, the disk is the 128 GiB one and swap is on
               id: resources-and-timers
               description: |

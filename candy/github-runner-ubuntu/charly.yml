@@ -2,11 +2,13 @@ github-runner-ubuntu:
     candy:
         description: |-
             The canonical, co-tenant-safe Ubuntu CI-runner recipe: the Docker daemon and its
-            GC/socket-heal timers, the CI userns and journald settings, and the four supervised
-            Actions runners. Extracted from the kind: vm entity that used to carry it as
-            cloud-init, so the SAME recipe serves every substrate (decision D1, opencharly/distro-ubuntu
-            issue 37) — a KubeVirt entity used to have to re-author all of it. Runner REGISTRATION
-            stays an operator step: a token lives one hour and is never committed.
+            GC/socket-heal timers, the CI userns and journald settings, and the runner tree plus
+            ONE parameterised registration script. Extracted from the kind: vm entity that used
+            to carry it as cloud-init, so the SAME recipe serves every substrate (decision D1,
+            opencharly/distro-ubuntu issue 37) — a KubeVirt entity used to have to re-author all
+            of it. Runner REGISTRATION stays an operator step: a token lives one hour and is
+            never committed. `charly-register-runners` takes the org, name prefix, labels and
+            count, so one script serves a single VM or a multi-VM fleet.
         distro:
             ubuntu:
                 package:
@@ -43,6 +45,40 @@ github-runner-ubuntu:
                     - slirp4netns
                     - uidmap
                     - fuse-overlayfs
+                    # skopeo: the enterprise container validations install it with
+                    # `sudo apt-get`, which this image cannot do (no passwordless sudo).
+                    # Shipping it makes the capability present so those jobs can assert
+                    # instead of install.
+                    - skopeo
+                    # Playwright's Chromium runtime dependencies. A workflow's
+                    # `playwright install --with-deps` runs apt as root, and this image
+                    # deliberately grants the runner no sudo (the same decision the
+                    # rootless runner candy records), so the dependencies must be IN the
+                    # image and the workflow installs the browser alone. Without these,
+                    # every browser-rendered proof fails at "Host system is missing
+                    # dependencies" — measured on opencharly/crabbox's docs proof.
+                    - libnss3
+                    - libnspr4
+                    - libatk1.0-0t64
+                    - libatk-bridge2.0-0t64
+                    - libcups2t64
+                    - libdrm2
+                    - libxkbcommon0
+                    - libxcomposite1
+                    - libxdamage1
+                    - libxfixes3
+                    - libxrandr2
+                    - libgbm1
+                    - libpango-1.0-0
+                    - libcairo2
+                    - libasound2t64
+                    - libatspi2.0-0t64
+                    - libx11-6
+                    - libxcb1
+                    - libxext6
+                    - libglib2.0-0t64
+                    - fonts-liberation
+                    - fonts-unifont
         plan:
             - run: "install /etc/systemd/system/docker-ci.service as 0644"
               copy: "files/etc/systemd/system/docker-ci.service"
@@ -68,30 +104,31 @@ github-runner-ubuntu:
               mode: "0644"
               run_as: root
               id: "file-04-charly-docker-sock-heal-timer"
-            - run: "install /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-1.service.d/docker-host.conf as 0644"
-              copy: "files/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-1.service.d/docker-host.conf"
-              to: "/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-1.service.d/docker-host.conf"
+            # ONE registration script replaces the operator's per-runner `config.sh`
+            # incantations. Registration stays operator-run (a token lives one hour and is
+            # never committed), but it is now parameterised — org, name prefix, labels and
+            # count — instead of hardcoded. `files/usr/local/sbin/charly-register-runners`.
+            - run: "install /usr/local/sbin/charly-register-runners as 0755"
+              copy: "files/usr/local/sbin/charly-register-runners"
+              to: "/usr/local/sbin/charly-register-runners"
+              mode: "0755"
+              run_as: root
+              id: "file-06-register-runners"
+            # The enterprise k3s validations need br_netfilter and the bridge sysctls. They
+            # are HOST root operations, and the runner deliberately has no passwordless
+            # sudo, so the image carries them at boot instead of the workflow doing it.
+            - run: "install /etc/modules-load.d/charly-ci-netfilter.conf as 0644"
+              copy: "files/etc/modules-load.d/charly-ci-netfilter.conf"
+              to: "/etc/modules-load.d/charly-ci-netfilter.conf"
               mode: "0644"
               run_as: root
-              id: "file-05-docker-host-conf"
-            - run: "install /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-2.service.d/docker-host.conf as 0644"
-              copy: "files/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-2.service.d/docker-host.conf"
-              to: "/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-2.service.d/docker-host.conf"
+              id: "file-07-netfilter-modules"
+            - run: "install /etc/sysctl.d/99-charly-ci-netfilter.conf as 0644"
+              copy: "files/etc/sysctl.d/99-charly-ci-netfilter.conf"
+              to: "/etc/sysctl.d/99-charly-ci-netfilter.conf"
               mode: "0644"
               run_as: root
-              id: "file-06-docker-host-conf"
-            - run: "install /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-3.service.d/docker-host.conf as 0644"
-              copy: "files/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-3.service.d/docker-host.conf"
-              to: "/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-3.service.d/docker-host.conf"
-              mode: "0644"
-              run_as: root
-              id: "file-07-docker-host-conf"
-            - run: "install /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-4.service.d/docker-host.conf as 0644"
-              copy: "files/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-4.service.d/docker-host.conf"
-              to: "/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-4.service.d/docker-host.conf"
-              mode: "0644"
-              run_as: root
-              id: "file-08-docker-host-conf"
+              id: "file-08-netfilter-sysctl"
             - run: "install /usr/local/sbin/charly-docker-store-gc as 0755"
               copy: "files/usr/local/sbin/charly-docker-store-gc"
               to: "/usr/local/sbin/charly-docker-store-gc"
@@ -212,6 +249,13 @@ github-runner-ubuntu:
               context: [deploy]
               command: |
                   sysctl -p /etc/sysctl.d/99-charly-ci-userns.conf
+            - run: "load br_netfilter and apply the netfilter sysctls on this boot"
+              id: "cmd-netfilter"
+              run_as: root
+              context: [deploy]
+              command: |
+                  modprobe br_netfilter
+                  sysctl -p /etc/sysctl.d/99-charly-ci-netfilter.conf
             - run: "step 16 \u2014 systemctl daemon-reload"
               id: "cmd-16-systemctl-daemon-reload"
               run_as: root
@@ -254,25 +298,33 @@ github-runner-ubuntu:
               context: [deploy]
               command: |
                   tar xzf /tmp/runner.tgz -C /home/ubuntu/actions-runner-base && chown -R ubuntu:ubuntu /home/ubuntu/actions-runner-base
-            - run: "step 23 \u2014 printf '%s\\n' 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vc"
-              id: "cmd-23-printf-s-n-opencharly-blacksmith-8vcpu-u"
-              run_as: root
-              context: [deploy]
-              command: |
-                  printf '%s\n' 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vcpu-ubuntu-2404,blacksmith-32vcpu-ubuntu-2404' > /etc/charly-runner-labels
-            - run: "step 24 \u2014 printf '%s\\n' 'opencharly' > /etc/charly-runner-labels-org"
-              id: "cmd-24-printf-s-n-opencharly-etc-charly-runner-"
-              run_as: root
-              context: [deploy]
-              command: |
-                  printf '%s\n' 'opencharly' > /etc/charly-runner-labels-org
-            - run: "step 25 \u2014 if ! swapon --show=NAME | grep -q '^/swapfile$'; then fallocate -l 8G "
-              id: "cmd-25-if-swapon-show-name-grep-q-swapfile-then"
+            # ONE runner .env replaces the four per-unit systemd drop-ins this recipe used
+            # to carry. The drop-ins named `actions.runner.opencharly.charly-githubrunner-
+            # ubuntu-1..4.service`, so they only worked for one org, one name prefix and
+            # exactly four runners — and they did nothing at all before registration
+            # (`svc.sh install` is what creates those units). The Actions runner sources
+            # `.env` from its own root on every start, so the base tree carries the value
+            # once and every runner copied from it inherits it, whatever its name.
+            # It is written AFTER the tarball extraction because `write:` does not create a
+            # parent directory, and the extraction is what creates the base tree.
+            - run: "write the runner tree's .env with the co-tenant Docker socket"
+              write: "/home/ubuntu/actions-runner-base/.env"
+              run_as: ubuntu
+              mode: "0644"
+              id: "file-05-runner-env"
+              content: |
+                  DOCKER_HOST=unix:///run/docker-ci.sock
+            # The label set used to live in two files (`/etc/charly-runner-labels` and
+            # `-org`), a second source that could drift from the registration command.
+            # `charly-register-runners` takes `RUNNER_LABELS` directly, so the files are
+            # deleted rather than kept as a parallel input (R5/R2).
+            - run: "step 23 \u2014 if ! swapon --show=NAME | grep -q '^/swapfile$'; then fallocate -l 8G "
+              id: "cmd-23-if-swapon-show-name-grep-q-swapfile-then"
               run_as: root
               context: [deploy]
               command: |
                   if ! swapon --show=NAME | grep -q '^/swapfile$'; then fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none; chmod 600 /swapfile; mkswap /swapfile >/dev/null; swapon /swapfile; fi
-            - run: "step 26 \u2014 grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >"
+            - run: "step 24 \u2014 grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >"
               id: "cmd-26-grep-q-swapfile-etc-fstab-echo-swapfile-"
               run_as: root
               context: [deploy]
@@ -301,3 +353,42 @@ github-runner-ubuntu:
               command: |
                   set -euo pipefail
                   test -x /home/ubuntu/actions-runner-base/bin/Runner.Listener
+            # The .env is the ONE carrying mechanism for the co-tenant Docker socket, so
+            # this asserts the exact line rather than the file's existence: a stale value
+            # (the old default /var/run/docker.sock) would pass an existence check and
+            # still send every lane to the wrong daemon.
+            - check: the runner tree's .env points DOCKER_HOST at the co-tenant daemon
+              id: check-runner-env
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  grep -qx 'DOCKER_HOST=unix:///run/docker-ci.sock' /home/ubuntu/actions-runner-base/.env
+            - check: the one registration script is installed, executable and self-describing
+              id: check-register-runners
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  test -x /usr/local/sbin/charly-register-runners
+                  /usr/local/sbin/charly-register-runners --help >/dev/null
+            # Enterprise container validations run skopeo. It is in the image so a job can
+            # assert it instead of `sudo apt-get install`ing it on a runner with no sudo.
+            - check: skopeo is installed and reports its version
+              id: check-skopeo
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  skopeo --version
+            # The k3s lanes `sudo modprobe br_netfilter` and set the bridge sysctl. Both are
+            # host-root operations, so the image performs them at boot and this asserts the
+            # RESULT — module loaded and the sysctl value actually in force.
+            - check: br_netfilter is loaded and bridge netfilter is enabled
+              id: check-netfilter
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  grep -q '^br_netfilter ' /proc/modules
+                  test "$(sysctl -n net.bridge.bridge-nf-call-iptables)" = 1
