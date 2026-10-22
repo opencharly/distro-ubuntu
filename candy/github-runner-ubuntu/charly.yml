@@ -230,8 +230,15 @@ github-runner-ubuntu:
               command: |
                   export DEBIAN_FRONTEND=noninteractive
                   apt-get update -qq
+                  apt-get install -y -qq --no-install-recommends software-properties-common
+                  # A CURRENT git: noble ships 2.43, and the repo's provenance tests call
+                  # `git --no-lazy-fetch` (added in 2.46). GitHub-hosted images carry a newer
+                  # git, so this is hosted parity, not a local preference. Measured: the
+                  # Scripts job failed with `unknown option: --no-lazy-fetch`.
+                  add-apt-repository -y ppa:git-core/ppa
+                  apt-get update -qq
                   apt-get install -y -qq --no-install-recommends \
-                    nodejs npm gh build-essential skopeo
+                    git libdigest-sha-perl nodejs npm gh build-essential skopeo
             - run: "step 9 \u2014 usermod -aG docker ubuntu"
               id: "cmd-09-usermod-ag-docker-ubuntu"
               run_as: root
@@ -323,22 +330,13 @@ github-runner-ubuntu:
               context: [deploy]
               command: |
                   tar xzf /tmp/runner.tgz -C /home/ubuntu/actions-runner-base && chown -R ubuntu:ubuntu /home/ubuntu/actions-runner-base
-            # ONE runner .env replaces the four per-unit systemd drop-ins this recipe used
-            # to carry. The drop-ins named `actions.runner.opencharly.charly-githubrunner-
-            # ubuntu-1..4.service`, so they only worked for one org, one name prefix and
-            # exactly four runners — and they did nothing at all before registration
-            # (`svc.sh install` is what creates those units). The Actions runner sources
-            # `.env` from its own root on every start, so the base tree carries the value
-            # once and every runner copied from it inherits it, whatever its name.
-            # It is written AFTER the tarball extraction because `write:` does not create a
-            # parent directory, and the extraction is what creates the base tree.
-            - run: "write the runner tree's .env with the co-tenant Docker socket"
-              write: "/home/ubuntu/actions-runner-base/.env"
-              run_as: ubuntu
-              mode: "0644"
-              id: "file-05-runner-env"
-              content: |
-                  DOCKER_HOST=unix:///run/docker-ci.sock
+            # NO DOCKER_HOST OVERRIDE. The co-tenant daemon is reached through the
+            # `/var/run/docker.sock` symlink (kept healthy by the heal timer), which is the
+            # path hosted runners use. Setting DOCKER_HOST in the runner tree CHANGES what a
+            # job observes: measured, `TestCreateContainerCanMountDockerSocket` then saw a
+            # non-default host and stopped mounting `/var/run/docker.sock`, and the scope
+            # test classified the engine as podman. The four per-unit drop-ins this recipe
+            # used to carry had the same effect and were removed for the same reason.
             # The label set used to live in two files (`/etc/charly-runner-labels` and
             # `-org`), a second source that could drift from the registration command.
             # `charly-register-runners` takes `RUNNER_LABELS` directly, so the files are
@@ -382,13 +380,14 @@ github-runner-ubuntu:
             # this asserts the exact line rather than the file's existence: a stale value
             # (the old default /var/run/docker.sock) would pass an existence check and
             # still send every lane to the wrong daemon.
-            - check: the runner tree's .env points DOCKER_HOST at the co-tenant daemon
-              id: check-runner-env
+            - check: the runner tree carries NO DOCKER_HOST override, so jobs see the default socket
+              id: check-no-docker-host-override
               run_as: root
               context: [runtime]
               command: |
                   set -euo pipefail
-                  grep -qx 'DOCKER_HOST=unix:///run/docker-ci.sock' /home/ubuntu/actions-runner-base/.env
+                  # Absent OR empty is correct; a set value changes what jobs observe.
+                  ! grep -q '^DOCKER_HOST=' /home/ubuntu/actions-runner-base/.env 2>/dev/null
             - check: the one registration script is installed, executable and self-describing
               id: check-register-runners
               run_as: root

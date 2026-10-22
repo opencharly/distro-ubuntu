@@ -38,7 +38,7 @@ on the live fleet (2026-10-10):
 | Docker pinned to `29.4.0` (`docker-ce=5:29.4.0-…`) and `apt-mark hold` | `setup-test-docker` asserts `docker version = 29.4.0`; a drifted daemon fails that lane and can fail version-sensitive tests |
 | The daemon runs as `docker-ci.service` on `/run/docker-ci.sock`, stock `docker.service`/`docker.socket` inactive | a lane's `systemctl stop docker.service docker.socket` killed the co-tenant daemon: measured 14:07:16 stop → 14:07:28 `buildx create` → *Cannot connect to the Docker daemon* |
 | `/var/run/docker.sock` kept as a symlink to the real socket | lanes, helpers and tests hardcode or mount that path (`runtime-image-fixture.mjs`, `docker-compute-token-retry`, production-compose mounts) |
-| `DOCKER_HOST=unix:///run/docker-ci.sock` in the runner tree's `.env` | a lane that relinks the shared symlink can otherwise redirect its co-tenants. It is ONE `.env` in `actions-runner-base`, copied into every runner root, NOT per-unit `*.service.d` drop-ins: those named a hardcoded org/prefix/four-unit set and did nothing before registration created the units |
+| **No `DOCKER_HOST` override** in the runner tree | a job must see the same default socket a hosted runner does. Setting it changed observed behaviour: `TestCreateContainerCanMountDockerSocket` stopped mounting `/var/run/docker.sock` and the scope test read the engine as podman. Co-tenancy is protected by the socket symlink + heal timer instead |
 | `charly-docker-sock-heal.timer` (30 s) | repairs a `/var/run/docker.sock` left dangling by such a lane, without fighting one that legitimately relinked it |
 | `charly-docker-store-gc.timer` (10 min) | every `setup-buildx-action` leaves a RUNNING buildkit builder container with its own cache volume; cancelled lanes leak them — 13 held 84 GB and filled the disk to 100 %. It also repairs the stale docker context/buildx selection such a lane leaves pointing at its deleted job directory (which breaks every later `docker` CLI call that does not set `DOCKER_HOST`) |
 | `journald` capped at 200 MB | a log flood cannot fill the disk |
@@ -93,7 +93,7 @@ charly check run check-githubrunner-ubuntu-vm
 ```
 
 The bed proves the pinned Docker version, the daemon/socket split, the symlink
-and the runner tree's `DOCKER_HOST` `.env`, co-tenant isolation under a
+and the ABSENCE of a `DOCKER_HOST` override in the runner tree, co-tenant isolation under a
 simulated lane mutation, the store GC collecting a leaked running container plus
 its volume, the runner tree and the registration script, the timers and the
 sizing. It registers no runner and needs no secret.

@@ -413,12 +413,11 @@ check-githubrunner-ubuntu-vm:
               id: socket-and-per-runner-docker-host
               description: |
                 The shared socket path lanes hardcode or mount resolves to the co-tenant-safe
-                daemon, and the runner tree carries DOCKER_HOST to that daemon's own socket —
-                which is what makes a lane's relink of the shared symlink unable to redirect
-                its co-tenants. Both halves are needed: the symlink alone would be hijackable,
-                the .env alone would break the tests that mount the path. The assertion is the
-                ONE .env every runner is copied from, not four per-unit drop-ins: those named a
-                hardcoded org/prefix/four-unit set and did not exist before registration.
+                daemon, and the runner tree carries NO DOCKER_HOST override, so a job sees the
+                same default socket a GitHub-hosted runner does and the tests that mount
+                /var/run/docker.sock keep working. The override was removed after measurement:
+                with DOCKER_HOST set, `TestCreateContainerCanMountDockerSocket` stopped
+                mounting the socket and the scope test classified the engine as podman.
               stdout:
                 - contains: SOCKET-AND-DOCKER-HOST-OK
               exit_status: 0
@@ -426,8 +425,8 @@ check-githubrunner-ubuntu-vm:
                 - runtime
               command: |
                 test "$(readlink /var/run/docker.sock)" = /run/docker-ci.sock &&
-                DOCKER_HOST=unix:///run/docker-ci.sock docker version --format '{{.Server.Version}}' >/dev/null &&
-                grep -qx 'DOCKER_HOST=unix:///run/docker-ci.sock' /home/ubuntu/actions-runner-base/.env &&
+                docker version --format '{{.Server.Version}}' >/dev/null &&
+                ! grep -q '^DOCKER_HOST=' /home/ubuntu/actions-runner-base/.env 2>/dev/null &&
                 printf 'SOCKET-AND-DOCKER-HOST-OK\n'
             - check: a co-tenant keeps a live daemon through DOCKER_HOST while a lane mutates the shared socket
               id: cotenant-isolation-under-lane-mutation
