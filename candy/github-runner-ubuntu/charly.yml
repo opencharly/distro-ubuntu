@@ -216,6 +216,22 @@ github-runner-ubuntu:
               context: [deploy]
               command: |
                   apt-mark hold docker-ce docker-ce-cli
+            # DEPLOY-TIME toolchain install. `distro.ubuntu.package:` is BUILD scope: an
+            # image built from this candy gets those packages, but a KubeVirt deploy boots
+            # a PREBUILT disk and only walks the deploy-context steps \u2014 measured on
+            # ci-runner-vmi-1: apt history showed the Docker packages (installed by the
+            # explicit run: steps) and none of node/npm/gh/build-essential, and the guest
+            # reported `node: command not found`, `linker cc not found`. This step is the
+            # deploy-scope half, and it is idempotent.
+            - run: "install the hosted-parity job toolchain at deploy time"
+              id: "cmd-deploy-toolchain"
+              run_as: root
+              context: [deploy]
+              command: |
+                  export DEBIAN_FRONTEND=noninteractive
+                  apt-get update -qq
+                  apt-get install -y -qq --no-install-recommends \
+                    nodejs npm gh build-essential skopeo
             - run: "step 9 \u2014 usermod -aG docker ubuntu"
               id: "cmd-09-usermod-ag-docker-ubuntu"
               run_as: root
@@ -383,6 +399,22 @@ github-runner-ubuntu:
                   /usr/local/sbin/charly-register-runners --help >/dev/null
             # Enterprise container validations run skopeo. It is in the image so a job can
             # assert it instead of `sudo apt-get install`ing it on a runner with no sudo.
+            # Hosted-runner parity: workflows call these directly and must not have to
+            # install them. Each fails by name, so a missing tool names itself.
+            - check: node is installed and reports its version
+              id: check-node
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  node --version
+            - check: the gh CLI is installed and reports its version
+              id: check-gh
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  gh --version
             - check: skopeo is installed and reports its version
               id: check-skopeo
               run_as: root
