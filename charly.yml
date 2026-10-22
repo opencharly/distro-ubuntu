@@ -256,6 +256,27 @@ check-githubrunner-ubuntu-vmi:
                 test -x /home/ubuntu/actions-runner-base/bin/Runner.Listener
                 test -S /run/docker-ci.sock
                 echo KUBEVIRT-CANDY-OK
+            # A PREBUILT-DISK deploy gets only the candy's deploy-context steps, so the
+            # build-scope `distro.ubuntu.package:` list never lands here. This is the check
+            # that can catch a deploy-scope gap (the Chromium set was in the wrong scope
+            # until this bed asserted it).
+            - check: the deploy-scope job toolchain is present in the prebuilt-disk guest
+              id: deploy-scope-toolchain
+              description: |
+                Asserts the deploy-time install, not the build-scope package list: a tool
+                that is only in `distro.ubuntu.package:` is absent here.
+              stdout:
+                - contains: DEPLOY-SCOPE-TOOLCHAIN-OK
+              exit_status: 0
+              context: ['runtime']
+              command: |
+                set -euo pipefail
+                for tool in node gh ruby skopeo pip3 unzip zip tree; do
+                  command -v "$tool" >/dev/null || { echo "missing deploy-scope tool: $tool" >&2; exit 1; }
+                done
+                dpkg-query -W -f='${Status}' libnss3 | grep -q 'install ok installed' \
+                  || { echo "missing Chromium runtime package: libnss3" >&2; exit 1; }
+                echo DEPLOY-SCOPE-TOOLCHAIN-OK
         description: |
             R10 proof of the KubeVirt form of the CI-runner recipe, on the configured quant-dev
             cluster. The candy is composed by THIS deploy over the substrate's managed
