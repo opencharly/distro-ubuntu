@@ -2,11 +2,13 @@ github-runner-ubuntu:
     candy:
         description: |-
             The canonical, co-tenant-safe Ubuntu CI-runner recipe: the Docker daemon and its
-            GC/socket-heal timers, the CI userns and journald settings, and the four supervised
-            Actions runners. Extracted from the kind: vm entity that used to carry it as
-            cloud-init, so the SAME recipe serves every substrate (decision D1, opencharly/distro-ubuntu
-            issue 37) — a KubeVirt entity used to have to re-author all of it. Runner REGISTRATION
-            stays an operator step: a token lives one hour and is never committed.
+            GC/socket-heal timers, the CI userns and journald settings, and the runner tree plus
+            ONE parameterised registration script. Extracted from the kind: vm entity that used
+            to carry it as cloud-init, so the SAME recipe serves every substrate (decision D1,
+            opencharly/distro-ubuntu issue 37) — a KubeVirt entity used to have to re-author all
+            of it. Runner REGISTRATION stays an operator step: a token lives one hour and is
+            never committed. `charly-register-runners` takes the org, name prefix, labels and
+            count, so one script serves a single VM or a multi-VM fleet.
         distro:
             ubuntu:
                 package:
@@ -43,6 +45,49 @@ github-runner-ubuntu:
                     - slirp4netns
                     - uidmap
                     - fuse-overlayfs
+                    # HOSTED-RUNNER PARITY. GitHub-hosted images preinstall node/npm and
+                    # gh, and workflows written for them call those directly without a
+                    # setup action. Measured on the fleet: the crabbox Docs job failed with
+                    # `node: command not found` (exit 127), and any `gh api` step would fail
+                    # the same way. Go is deliberately NOT here: every workflow that needs
+                    # it uses actions/setup-go, which downloads the pinned toolchain.
+                    - nodejs
+                    - npm
+                    - gh
+                    # skopeo: the enterprise container validations install it with
+                    # `sudo apt-get`, which this image cannot do (no passwordless sudo).
+                    # Shipping it makes the capability present so those jobs can assert
+                    # instead of install.
+                    - skopeo
+                    # Playwright's Chromium runtime dependencies. A workflow's
+                    # `playwright install --with-deps` runs apt as root, and this image
+                    # deliberately grants the runner no sudo (the same decision the
+                    # rootless runner candy records), so the dependencies must be IN the
+                    # image and the workflow installs the browser alone. Without these,
+                    # every browser-rendered proof fails at "Host system is missing
+                    # dependencies" — measured on opencharly/crabbox's docs proof.
+                    - libnss3
+                    - libnspr4
+                    - libatk1.0-0t64
+                    - libatk-bridge2.0-0t64
+                    - libcups2t64
+                    - libdrm2
+                    - libxkbcommon0
+                    - libxcomposite1
+                    - libxdamage1
+                    - libxfixes3
+                    - libxrandr2
+                    - libgbm1
+                    - libpango-1.0-0
+                    - libcairo2
+                    - libasound2t64
+                    - libatspi2.0-0t64
+                    - libx11-6
+                    - libxcb1
+                    - libxext6
+                    - libglib2.0-0t64
+                    - fonts-liberation
+                    - fonts-unifont
         plan:
             - run: "install /etc/systemd/system/docker-ci.service as 0644"
               copy: "files/etc/systemd/system/docker-ci.service"
@@ -68,30 +113,31 @@ github-runner-ubuntu:
               mode: "0644"
               run_as: root
               id: "file-04-charly-docker-sock-heal-timer"
-            - run: "install /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-1.service.d/docker-host.conf as 0644"
-              copy: "files/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-1.service.d/docker-host.conf"
-              to: "/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-1.service.d/docker-host.conf"
+            # ONE registration script replaces the operator's per-runner `config.sh`
+            # incantations. Registration stays operator-run (a token lives one hour and is
+            # never committed), but it is now parameterised — org, name prefix, labels and
+            # count — instead of hardcoded. `files/usr/local/sbin/charly-register-runners`.
+            - run: "install /usr/local/sbin/charly-register-runners as 0755"
+              copy: "files/usr/local/sbin/charly-register-runners"
+              to: "/usr/local/sbin/charly-register-runners"
+              mode: "0755"
+              run_as: root
+              id: "file-06-register-runners"
+            # The enterprise k3s validations need br_netfilter and the bridge sysctls. They
+            # are HOST root operations, and the runner deliberately has no passwordless
+            # sudo, so the image carries them at boot instead of the workflow doing it.
+            - run: "install /etc/modules-load.d/charly-ci-netfilter.conf as 0644"
+              copy: "files/etc/modules-load.d/charly-ci-netfilter.conf"
+              to: "/etc/modules-load.d/charly-ci-netfilter.conf"
               mode: "0644"
               run_as: root
-              id: "file-05-docker-host-conf"
-            - run: "install /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-2.service.d/docker-host.conf as 0644"
-              copy: "files/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-2.service.d/docker-host.conf"
-              to: "/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-2.service.d/docker-host.conf"
+              id: "file-07-netfilter-modules"
+            - run: "install /etc/sysctl.d/99-charly-ci-netfilter.conf as 0644"
+              copy: "files/etc/sysctl.d/99-charly-ci-netfilter.conf"
+              to: "/etc/sysctl.d/99-charly-ci-netfilter.conf"
               mode: "0644"
               run_as: root
-              id: "file-06-docker-host-conf"
-            - run: "install /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-3.service.d/docker-host.conf as 0644"
-              copy: "files/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-3.service.d/docker-host.conf"
-              to: "/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-3.service.d/docker-host.conf"
-              mode: "0644"
-              run_as: root
-              id: "file-07-docker-host-conf"
-            - run: "install /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-4.service.d/docker-host.conf as 0644"
-              copy: "files/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-4.service.d/docker-host.conf"
-              to: "/etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-4.service.d/docker-host.conf"
-              mode: "0644"
-              run_as: root
-              id: "file-08-docker-host-conf"
+              id: "file-08-netfilter-sysctl"
             - run: "install /usr/local/sbin/charly-docker-store-gc as 0755"
               copy: "files/usr/local/sbin/charly-docker-store-gc"
               to: "/usr/local/sbin/charly-docker-store-gc"
@@ -170,6 +216,43 @@ github-runner-ubuntu:
               context: [deploy]
               command: |
                   apt-mark hold docker-ce docker-ce-cli
+            # DEPLOY-TIME toolchain install. `distro.ubuntu.package:` is BUILD scope: an
+            # image built from this candy gets those packages, but a KubeVirt deploy boots
+            # a PREBUILT disk and only walks the deploy-context steps \u2014 measured on
+            # ci-runner-vmi-1: apt history showed the Docker packages (installed by the
+            # explicit run: steps) and none of node/npm/gh/build-essential, and the guest
+            # reported `node: command not found`, `linker cc not found`. This step is the
+            # deploy-scope half, and it is idempotent.
+            - run: "install the hosted-parity job toolchain at deploy time"
+              id: "cmd-deploy-toolchain"
+              run_as: root
+              context: [deploy]
+              command: |
+                  export DEBIAN_FRONTEND=noninteractive
+                  apt-get update -qq
+                  apt-get install -y -qq --no-install-recommends software-properties-common
+                  # A CURRENT git: noble ships 2.43, and the repo's provenance tests call
+                  # `git --no-lazy-fetch` (added in 2.46). GitHub-hosted images carry a newer
+                  # git, so this is hosted parity, not a local preference. Measured: the
+                  # Scripts job failed with `unknown option: --no-lazy-fetch`.
+                  add-apt-repository -y ppa:git-core/ppa
+                  apt-get update -qq
+                  # The full hosted-parity job toolchain, INCLUDING Chromium's runtime set.
+                  # These are declared in `distro.ubuntu.package:` for image builds, but that
+                  # is BUILD scope and never reaches a prebuilt-disk deploy — measured: pip3,
+                  # unzip, zip, tree, moreutils AND every Chromium package were absent from a
+                  # live KubeVirt runner. The list below is what a prebuilt-disk deploy gets;
+                  # `check-chromium-runtime` would otherwise fail on the very substrate this
+                  # recipe targets.
+                  apt-get install -y -qq --no-install-recommends \
+                    git libdigest-sha-perl nodejs npm gh build-essential skopeo \
+                    python3-pip python3-venv unzip zip tree moreutils \
+                    bc less lsof strace netcat-openbsd dnsutils ripgrep ruby \
+                    libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 \
+                    libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+                    libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
+                    libatspi2.0-0t64 libx11-6 libxcb1 libxext6 libglib2.0-0t64 \
+                    fonts-liberation fonts-unifont
             - run: "step 9 \u2014 usermod -aG docker ubuntu"
               id: "cmd-09-usermod-ag-docker-ubuntu"
               run_as: root
@@ -212,6 +295,13 @@ github-runner-ubuntu:
               context: [deploy]
               command: |
                   sysctl -p /etc/sysctl.d/99-charly-ci-userns.conf
+            - run: "load br_netfilter and apply the netfilter sysctls on this boot"
+              id: "cmd-netfilter"
+              run_as: root
+              context: [deploy]
+              command: |
+                  modprobe br_netfilter
+                  sysctl -p /etc/sysctl.d/99-charly-ci-netfilter.conf
             - run: "step 16 \u2014 systemctl daemon-reload"
               id: "cmd-16-systemctl-daemon-reload"
               run_as: root
@@ -254,25 +344,50 @@ github-runner-ubuntu:
               context: [deploy]
               command: |
                   tar xzf /tmp/runner.tgz -C /home/ubuntu/actions-runner-base && chown -R ubuntu:ubuntu /home/ubuntu/actions-runner-base
-            - run: "step 23 \u2014 printf '%s\\n' 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vc"
-              id: "cmd-23-printf-s-n-opencharly-blacksmith-8vcpu-u"
+            # NO DOCKER_HOST OVERRIDE. The co-tenant daemon is reached through the
+            # `/var/run/docker.sock` symlink (kept healthy by the heal timer), which is the
+            # path hosted runners use. Setting DOCKER_HOST in the runner tree CHANGES what a
+            # job observes: measured, `TestCreateContainerCanMountDockerSocket` then saw a
+            # non-default host and stopped mounting `/var/run/docker.sock`, and the scope
+            # test classified the engine as podman. The four per-unit drop-ins this recipe
+            # used to carry had the same effect and were removed for the same reason.
+            #
+            # A WARM GO CACHE, SHARED BY THIS VM's runners. The org's workflows pin
+            # `cache: false` for setup-go, so every job otherwise re-downloads the module
+            # graph and recompiles the world; four runners per VM sharing one build/module
+            # cache turns the second and later jobs on that VM warm. Go's build cache is
+            # safe to share across concurrent builds. This is runner-side state (never a
+            # DOCKER_HOST or any other value that changes what a job observes), written to
+            # the runner tree's `.env`, which the Actions runner sources at start.
+            - run: "create the shared Go cache directories"
+              id: "go-cache-dirs"
               run_as: root
               context: [deploy]
               command: |
-                  printf '%s\n' 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vcpu-ubuntu-2404,blacksmith-32vcpu-ubuntu-2404' > /etc/charly-runner-labels
-            - run: "step 24 \u2014 printf '%s\\n' 'opencharly' > /etc/charly-runner-labels-org"
-              id: "cmd-24-printf-s-n-opencharly-etc-charly-runner-"
-              run_as: root
-              context: [deploy]
-              command: |
-                  printf '%s\n' 'opencharly' > /etc/charly-runner-labels-org
-            - run: "step 25 \u2014 if ! swapon --show=NAME | grep -q '^/swapfile$'; then fallocate -l 8G "
-              id: "cmd-25-if-swapon-show-name-grep-q-swapfile-then"
+                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go
+                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/build
+                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/mod
+                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/path
+            - run: "write the runner .env with the shared Go cache paths"
+              id: "file-runner-go-env"
+              write: "/home/ubuntu/actions-runner-base/.env"
+              run_as: ubuntu
+              mode: "0644"
+              content: |
+                  GOPATH=/var/cache/charly/go/path
+                  GOCACHE=/var/cache/charly/go/build
+                  GOMODCACHE=/var/cache/charly/go/mod
+            # The label set used to live in two files (`/etc/charly-runner-labels` and
+            # `-org`), a second source that could drift from the registration command.
+            # `charly-register-runners` takes `RUNNER_LABELS` directly, so the files are
+            # deleted rather than kept as a parallel input (R5/R2).
+            - run: "step 23 \u2014 if ! swapon --show=NAME | grep -q '^/swapfile$'; then fallocate -l 8G "
+              id: "cmd-23-if-swapon-show-name-grep-q-swapfile-then"
               run_as: root
               context: [deploy]
               command: |
                   if ! swapon --show=NAME | grep -q '^/swapfile$'; then fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none; chmod 600 /swapfile; mkswap /swapfile >/dev/null; swapon /swapfile; fi
-            - run: "step 26 \u2014 grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >"
+            - run: "step 24 \u2014 grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >"
               id: "cmd-26-grep-q-swapfile-etc-fstab-echo-swapfile-"
               run_as: root
               context: [deploy]
@@ -301,3 +416,103 @@ github-runner-ubuntu:
               command: |
                   set -euo pipefail
                   test -x /home/ubuntu/actions-runner-base/bin/Runner.Listener
+            # The .env is the ONE carrying mechanism for the co-tenant Docker socket, so
+            # this asserts the exact line rather than the file's existence: a stale value
+            # (the old default /var/run/docker.sock) would pass an existence check and
+            # still send every lane to the wrong daemon.
+            - check: the runner .env points Go at the VM's shared build/module cache
+              id: check-go-cache-env
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  grep -qx 'GOCACHE=/var/cache/charly/go/build' /home/ubuntu/actions-runner-base/.env
+                  grep -qx 'GOMODCACHE=/var/cache/charly/go/mod' /home/ubuntu/actions-runner-base/.env
+                  test -d /var/cache/charly/go/build
+            - check: the runner tree carries NO DOCKER_HOST override, so jobs see the default socket
+              id: check-no-docker-host-override
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  # Absent OR empty is correct; a set value changes what jobs observe.
+                  ! grep -q '^DOCKER_HOST=' /home/ubuntu/actions-runner-base/.env 2>/dev/null
+            - check: the one registration script is installed, executable and self-describing
+              id: check-register-runners
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  test -x /usr/local/sbin/charly-register-runners
+                  /usr/local/sbin/charly-register-runners --help >/dev/null
+            # Enterprise container validations run skopeo. It is in the image so a job can
+            # assert it instead of `sudo apt-get install`ing it on a runner with no sudo.
+            # Hosted-runner parity: workflows call these directly and must not have to
+            # install them. Each fails by name, so a missing tool names itself.
+            - check: node is installed and reports its version
+              id: check-node
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  node --version
+            - check: the gh CLI is installed and reports its version
+              id: check-gh
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  gh --version
+            - check: pip3 and the archive tools are present
+              id: check-job-toolchain
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  pip3 --version
+                  unzip -v >/dev/null
+                  zip -v >/dev/null
+                  tree --version >/dev/null
+            # Chromium's runtime set is what a browser job actually needs; a package list
+            # in `distro.ubuntu.package:` is build-scope and would not prove the deploy.
+            # Each package is named on failure, so a missing one is not a generic browser error.
+            - check: the Playwright Chromium runtime packages are installed
+              id: check-chromium-runtime
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  for pkg in libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+                             libcups2t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
+                             libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
+                             libasound2t64 libatspi2.0-0t64 libx11-6 libxcb1 libxext6 \
+                             libglib2.0-0t64 fonts-liberation fonts-unifont; do
+                    dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed' \
+                      || { echo "missing Chromium runtime package: $pkg" >&2; exit 1; }
+                  done
+                  echo chromium-runtime-ok
+            - check: ruby is installed for the Scripts job's live smokes
+              id: check-ruby
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  ruby --version
+            - check: skopeo is installed and reports its version
+              id: check-skopeo
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  skopeo --version
+            # The k3s lanes `sudo modprobe br_netfilter` and set the bridge sysctl. Both are
+            # host-root operations, so the image performs them at boot and this asserts the
+            # RESULT — module loaded and the sysctl value actually in force.
+            - check: br_netfilter is loaded and bridge netfilter is enabled
+              id: check-netfilter
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  grep -q '^br_netfilter ' /proc/modules
+                  test "$(sysctl -n net.bridge.bridge-nf-call-iptables)" = 1
