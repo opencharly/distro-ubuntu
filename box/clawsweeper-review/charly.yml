@@ -28,4 +28,4 @@ clawsweeper-review:
         candy:
             # Pinned by commit: the layer's tag is written by tag-on-merge at first merge; a
             # commit pin is the same immutable artefact and does not wait on tag delivery.
-            - '@github.com/opencharly/layer-clawsweeper/candy/clawsweeper-review:2524e36063a17ca7f78058d656acabcb53b8725c'
+            - '@github.com/opencharly/layer-clawsweeper/candy/clawsweeper-review:1680a5e2f90073ff320872c6f70d13e5935780f1'
