@@ -356,11 +356,14 @@ github-runner-ubuntu:
             # `cache: false` for setup-go, so every job otherwise re-downloads the module
             # graph; downloading it once per VM turns later jobs warm.
             #
-            # GOCACHE IS DELIBERATELY NOT OVERRIDDEN. Relocating the BUILD cache to a shared,
-            # persistent directory produced `panic: could not look up runtime.mapinitnoop`
-            # in the Go linker on one coverage job — the build cache is the component whose
-            # entries must match the exact toolchain, so it stays per-job (Go's default under
-            # the runner user). The module cache is immutable content and safe to share. This is runner-side state (never a
+            # GOCACHE IS DELIBERATELY NOT OVERRIDDEN. Relocating the BUILD cache to a custom
+            # persistent path (/var/cache/charly/go/build, created root-side) produced
+            # `panic: could not look up runtime.mapinitnoop` in the Go linker on one coverage
+            # job, and the surrounding ownership change also broke `actions/setup-go`'s post
+            # step. Go's DEFAULT build cache is per-USER (~/.cache/go-build), shared by every
+            # runner on this VM and across runs — that sharing is normal and content-addressed,
+            # so it is left alone; what is removed is the custom path and its ownership. The
+            # module cache is immutable content and stays shared under /var/cache/charly/go. This is runner-side state (never a
             # DOCKER_HOST or any other value that changes what a job observes), written to
             # the runner tree's `.env`, which the Actions runner sources at start.
             - run: "create the shared Go cache directories"
@@ -433,6 +436,9 @@ github-runner-ubuntu:
               command: |
                   set -euo pipefail
                   grep -qx 'GOMODCACHE=/var/cache/charly/go/mod' /home/ubuntu/actions-runner-base/.env
+                  # NEGATIVE assertion: a future edit that re-introduces the GOCACHE override
+                  # must fail the build, not silently return to the state that panicked.
+                  ! grep -q '^GOCACHE=' /home/ubuntu/actions-runner-base/.env
             - check: the runner tree carries NO DOCKER_HOST override, so jobs see the default socket
               id: check-no-docker-host-override
               run_as: root
