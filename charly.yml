@@ -201,6 +201,208 @@ githubrunner-ubuntu-vmi:
             add_candy. It cannot be composed here: a venue-bearing kubevirt node is classified as
             a template by the loader, and templates reject add_candy.
 
+
+
+githubrunner-ubuntu-vmi-2vcpu:
+    kubevirt:
+        cluster: quant-dev
+        # 2 vCPU /  4 GB — the LIGHT tier: docs, scripts, go-install and the aggregator jobs. One runner per VM, so a
+        # light job never sits on a big host.
+        # A kubevirt deploy may NOT override cpu/memory on a `from:` template (closed disjunction,
+        # measured as `from: field not allowed`), so each SIZE must be a template. The four tiers
+        # exist because one size serves neither repo: openclaw-enterprise routes its 8/16/32-vcpu
+        # lanes to those blacksmith labels BY NAME, so a runner must genuinely be that size.
+        # A crabbox PR needs 26 concurrent slots; the pool is 27 (9x2, 6x8, 2x16, 1x32).
+        namespace: default
+        # The guest identity. A data_volume is a bare disk with no OCI metadata to read, so
+        # unlike a containerDisk it MUST declare distro + ssh_user here (spec/schema/kubevirt.cue).
+        distro: ubuntu
+        ssh_user: ubuntu
+        # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
+        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
+        # why data_volume+http cannot be used on this cluster).
+        source:
+            kind: container_disk
+            # A DURABLE, PUBLIC ref. It replaces `ttl.sh/…:6h`, which expires by design and
+            # made this leg impossible to reproduce from the committed tree (the previous
+            # build is gone within hours). Rebuild and republish with:
+            #   charly vm build githubrunner-ubuntu-disk --container-disk \
+            #     --push ghcr.io/opencharly/githubrunner-ubuntu-disk:<CalVer>
+            image: ghcr.io/opencharly/githubrunner-ubuntu-disk:2026.295.0418
+            pull_policy: Always
+            disk_path_in_image: /disk/disk.img
+        run_strategy: Always
+        memory: 4G
+        cpu:
+            cores: 2
+        machine: q35
+        # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
+        # bios default would boot nothing.
+        firmware:
+            bootloader: efi
+        cloud_init:
+            timezone: UTC
+            package:
+                - qemu-guest-agent
+            # charly reaches into the booted guest over the substrate's managed port-forward and
+            # walks the candy's plan there; the recipe is never re-authored into cloud-init.
+            charly_install:
+                strategy: auto
+        description: >-
+            2 vCPU / 4 GB — the LIGHT tier: docs, scripts, go-install, the aggregator jobs and
+            enterprise's 2-vcpu lanes. One runner per VM, so a light job never holds a big host.
+
+githubrunner-ubuntu-vmi-8vcpu:
+    kubevirt:
+        cluster: quant-dev
+        # 8 vCPU / 20 GB — the MAIN tier: crabbox's Go test and coverage shards, two runners per VM at four vCPU
+        # each with enough RAM that a Go build's peak does not swap.
+        # A kubevirt deploy may NOT override cpu/memory on a `from:` template (closed disjunction,
+        # measured as `from: field not allowed`), so each SIZE must be a template. The four tiers
+        # exist because one size serves neither repo: openclaw-enterprise routes its 8/16/32-vcpu
+        # lanes to those blacksmith labels BY NAME, so a runner must genuinely be that size.
+        # A crabbox PR needs 26 concurrent slots; the pool is 27 (9x2, 6x8, 2x16, 1x32).
+        namespace: default
+        # The guest identity. A data_volume is a bare disk with no OCI metadata to read, so
+        # unlike a containerDisk it MUST declare distro + ssh_user here (spec/schema/kubevirt.cue).
+        distro: ubuntu
+        ssh_user: ubuntu
+        # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
+        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
+        # why data_volume+http cannot be used on this cluster).
+        source:
+            kind: container_disk
+            # A DURABLE, PUBLIC ref. It replaces `ttl.sh/…:6h`, which expires by design and
+            # made this leg impossible to reproduce from the committed tree (the previous
+            # build is gone within hours). Rebuild and republish with:
+            #   charly vm build githubrunner-ubuntu-disk --container-disk \
+            #     --push ghcr.io/opencharly/githubrunner-ubuntu-disk:<CalVer>
+            image: ghcr.io/opencharly/githubrunner-ubuntu-disk:2026.295.0418
+            pull_policy: Always
+            disk_path_in_image: /disk/disk.img
+        run_strategy: Always
+        memory: 20G
+        cpu:
+            cores: 8
+        machine: q35
+        # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
+        # bios default would boot nothing.
+        firmware:
+            bootloader: efi
+        cloud_init:
+            timezone: UTC
+            package:
+                - qemu-guest-agent
+            # charly reaches into the booted guest over the substrate's managed port-forward and
+            # walks the candy's plan there; the recipe is never re-authored into cloud-init.
+            charly_install:
+                strategy: auto
+        description: >-
+            8 vCPU / 20 GB — the MAIN tier for crabbox's Go test/coverage shards: two runners per VM,
+            four vCPU each, and enough RAM that a Go build's peak does not swap.
+
+githubrunner-ubuntu-vmi-16vcpu:
+    kubevirt:
+        cluster: quant-dev
+        # 16 vCPU / 32 GB — the HEAVY tier: Go modules and the coverage matrix at eight vCPU per runner, and
+        # enterprise's 16-vcpu lanes.
+        # A kubevirt deploy may NOT override cpu/memory on a `from:` template (closed disjunction,
+        # measured as `from: field not allowed`), so each SIZE must be a template. The four tiers
+        # exist because one size serves neither repo: openclaw-enterprise routes its 8/16/32-vcpu
+        # lanes to those blacksmith labels BY NAME, so a runner must genuinely be that size.
+        # A crabbox PR needs 26 concurrent slots; the pool is 27 (9x2, 6x8, 2x16, 1x32).
+        namespace: default
+        # The guest identity. A data_volume is a bare disk with no OCI metadata to read, so
+        # unlike a containerDisk it MUST declare distro + ssh_user here (spec/schema/kubevirt.cue).
+        distro: ubuntu
+        ssh_user: ubuntu
+        # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
+        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
+        # why data_volume+http cannot be used on this cluster).
+        source:
+            kind: container_disk
+            # A DURABLE, PUBLIC ref. It replaces `ttl.sh/…:6h`, which expires by design and
+            # made this leg impossible to reproduce from the committed tree (the previous
+            # build is gone within hours). Rebuild and republish with:
+            #   charly vm build githubrunner-ubuntu-disk --container-disk \
+            #     --push ghcr.io/opencharly/githubrunner-ubuntu-disk:<CalVer>
+            image: ghcr.io/opencharly/githubrunner-ubuntu-disk:2026.295.0418
+            pull_policy: Always
+            disk_path_in_image: /disk/disk.img
+        run_strategy: Always
+        memory: 32G
+        cpu:
+            cores: 16
+        machine: q35
+        # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
+        # bios default would boot nothing.
+        firmware:
+            bootloader: efi
+        cloud_init:
+            timezone: UTC
+            package:
+                - qemu-guest-agent
+            # charly reaches into the booted guest over the substrate's managed port-forward and
+            # walks the candy's plan there; the recipe is never re-authored into cloud-init.
+            charly_install:
+                strategy: auto
+        description: >-
+            16 vCPU / 32 GB — the HEAVY tier: Go modules and the coverage matrix at eight vCPU per
+            runner, and enterprise's 16-vcpu lanes.
+
+githubrunner-ubuntu-vmi-32vcpu:
+    kubevirt:
+        cluster: quant-dev
+        # 32 vCPU / 60 GB — the BIGGEST tier: two runners at sixteen vCPU each, the largest slice any single CI job
+        # can get here, and enterprise's 32-vcpu lanes.
+        # A kubevirt deploy may NOT override cpu/memory on a `from:` template (closed disjunction,
+        # measured as `from: field not allowed`), so each SIZE must be a template. The four tiers
+        # exist because one size serves neither repo: openclaw-enterprise routes its 8/16/32-vcpu
+        # lanes to those blacksmith labels BY NAME, so a runner must genuinely be that size.
+        # A crabbox PR needs 26 concurrent slots; the pool is 27 (9x2, 6x8, 2x16, 1x32).
+        namespace: default
+        # The guest identity. A data_volume is a bare disk with no OCI metadata to read, so
+        # unlike a containerDisk it MUST declare distro + ssh_user here (spec/schema/kubevirt.cue).
+        distro: ubuntu
+        ssh_user: ubuntu
+        # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
+        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
+        # why data_volume+http cannot be used on this cluster).
+        source:
+            kind: container_disk
+            # A DURABLE, PUBLIC ref. It replaces `ttl.sh/…:6h`, which expires by design and
+            # made this leg impossible to reproduce from the committed tree (the previous
+            # build is gone within hours). Rebuild and republish with:
+            #   charly vm build githubrunner-ubuntu-disk --container-disk \
+            #     --push ghcr.io/opencharly/githubrunner-ubuntu-disk:<CalVer>
+            image: ghcr.io/opencharly/githubrunner-ubuntu-disk:2026.295.0418
+            pull_policy: Always
+            disk_path_in_image: /disk/disk.img
+        run_strategy: Always
+        memory: 60G
+        cpu:
+            cores: 32
+        machine: q35
+        # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
+        # bios default would boot nothing.
+        firmware:
+            bootloader: efi
+        cloud_init:
+            timezone: UTC
+            package:
+                - qemu-guest-agent
+            # charly reaches into the booted guest over the substrate's managed port-forward and
+            # walks the candy's plan there; the recipe is never re-authored into cloud-init.
+            charly_install:
+                strategy: auto
+        description: >-
+            32 vCPU / 60 GB — the BIGGEST tier, matching enterprise's 32-vcpu lanes by name; two runners
+            at sixteen vCPU each, the largest slice any single CI job can get here.
+
 # The KubeVirt bed. Unlike the libvirt bed this does NOT restate the recipe: it composes the
 # SAME candy onto the SAME entity through add_candy, which is what makes one recipe serve both
 # substrates. disposable: true is the authorization for the destroy/rebuild path it exercises.
