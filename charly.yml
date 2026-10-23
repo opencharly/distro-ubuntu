@@ -210,8 +210,9 @@ githubrunner-ubuntu-vmi-pool:
         # A kubevirt deploy may NOT override cpu/memory on a `from:` template (the schema is a
         # closed disjunction: `from:` XOR an explicit spec, measured as `from: field not allowed`),
         # so the size has to live in a template. ONE size is enough: the cluster has ~80 free
-        # vCPU and a crabbox PR starts 20 Linux jobs at once, so 10 VMs of 8 vCPU with 2 runners
-        # each is exactly 20 slots and exactly all of the free vCPU. A hierarchy of sizes would
+        # vCPU, and ONE crabbox PR needs 26 concurrent slots: 20 Linux jobs in ci.yml, 4 from the
+        # connector matrix, plus the pr-validator and the ClawSweeper review itself. 13 VMs of
+        # 6 vCPU with 2 runners each is 26 slots in 78 vCPU / 208 GB. A hierarchy of sizes would
         # buy nothing without per-job routing, and the upstream workflows stay in sync as they
         # are — every job asks for the same label.
         namespace: default
@@ -234,9 +235,9 @@ githubrunner-ubuntu-vmi-pool:
             pull_policy: Always
             disk_path_in_image: /disk/disk.img
         run_strategy: Always
-        memory: 20G
+        memory: 16G
         cpu:
-            cores: 8
+            cores: 6
         machine: q35
         # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
         # bios default would boot nothing.
