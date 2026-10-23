@@ -32,4 +32,4 @@ clawsweeper-review:
             # the corpus generator refuses that, so the whole marketplace corpus could not
             # be generated while this box held the pre-fix commit. A tag pin is also the
             # form `charly box reconcile` realigns; a commit pin is invisible to it.
-            - '@github.com/opencharly/layer-clawsweeper/candy/clawsweeper-review:v2026.296.1202'
+            - '@github.com/opencharly/layer-clawsweeper/candy/clawsweeper-review:v2026.296.1447'
