@@ -373,7 +373,6 @@ github-runner-ubuntu:
                   # fails an otherwise-green aggregate job.
                   install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly
                   install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go
-                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/build
                   install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/mod
                   install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/path
             - run: "write the runner .env with the shared Go cache paths"
@@ -434,7 +433,6 @@ github-runner-ubuntu:
               command: |
                   set -euo pipefail
                   grep -qx 'GOMODCACHE=/var/cache/charly/go/mod' /home/ubuntu/actions-runner-base/.env
-                  test -d /var/cache/charly/go/build
             - check: the runner tree carries NO DOCKER_HOST override, so jobs see the default socket
               id: check-no-docker-host-override
               run_as: root
