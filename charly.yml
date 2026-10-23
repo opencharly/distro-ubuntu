@@ -329,7 +329,8 @@ githubrunner-ubuntu-vmi-16vcpu:
         # and half the RAM. The label is a routing decision the operator made, not a
         # measurement. If a 32-vCPU-labelled job starts failing on OOM or timing on this
         # host, the fix is to size the VM to 32/128 — which currently does not fit: the
-        # approved shape is 320 GB and 128 GB would push the fleet past the 392 GiB cluster.
+        # approved shape is 336 GB (9x16 + 4x32 + 1x64), and resizing this VM from 64 to
+        # 128 adds 64 GiB, bringing the fleet to 400 GiB — past the 392 GiB cluster.
         #
         # (Contrast the 4-vCPU tier's `blacksmith-2vcpu` tag: 4 >= 2 is an upgrade.)
         #
