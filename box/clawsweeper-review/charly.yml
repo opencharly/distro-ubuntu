@@ -1,0 +1,15 @@
+# The ClawSweeper review image. It is a one-shot tool, not a service: a caller runs it with the
+# PR tree mounted read-only and no GitHub token, and posts the JSON verdict itself.
+clawsweeper-review:
+    candy:
+        base: ubuntu:24.04
+        platform:
+            - linux/amd64
+        description: |
+            The ClawSweeper review engine (pinned upstream, Node 24 + pnpm, Codex 0.162.1) on the
+            OpenCharly Ollama Cloud responses endpoint. Built for `--local-range`: no token, no
+            GitHub writes, read-only target tree.
+        candy:
+            # Pinned by commit: the layer's tag is written by tag-on-merge at first merge; a
+            # commit pin is the same immutable artefact and does not wait on tag delivery.
+            - '@github.com/opencharly/layer-clawsweeper/candy/clawsweeper-review:e503c170e191e477cf2b08287b90c27b5c382fab'

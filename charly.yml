@@ -779,3 +779,48 @@ githubrunner-ubuntu-skill:
         triggers:
             - "The CI-runner Ubuntu VM / `githubrunner-ubuntu` / the `check-githubrunner-ubuntu-vm` bed"
             - "A CI lane failing on a self-hosted Ubuntu runner (docker daemon, disk, buildx builder)"
+
+# The ClawSweeper review bed. A disposable pod runs the image against a TWO-COMMIT fixture
+# whose second commit introduces a deliberate defect, and asserts that the engine returns a
+# JSON verdict. The model call is a LIVE service: without OLLAMA_API_KEY the step prints SKIP
+# and exits 0 — visibly not exercised, never mocked (R8).
+check-clawsweeper-review-pod:
+    pod:
+        image: clawsweeper-review
+        disposable: true
+        lifecycle: dev
+        plan:
+            - run: "create the two-commit fixture the review is asked to judge"
+              context: [deploy]
+              command: |
+                  set -euo pipefail
+                  rm -rf /tmp/fixture && mkdir -p /tmp/fixture && cd /tmp/fixture
+                  git init -q -b main
+                  git config user.email fixture@example.invalid
+                  git config user.name fixture
+                  printf 'def add(a, b):\n    return a + b\n' > calc.py
+                  git add calc.py && git -c user.email=fixture@example.invalid commit -qm "base: add() adds"
+                  printf 'def add(a, b):\n    return a - b\n' > calc.py
+                  git add calc.py && git -c user.email=fixture@example.invalid commit -qm "defect: add() subtracts"
+            - check: the review returns a JSON verdict, or skips visibly without a model key
+              id: review-verdict
+              description: |
+                Runs the real entrypoint over the fixture. A missing OLLAMA_API_KEY prints SKIP
+                and exits 0: the check is not exercised then, and the log says so. With a key,
+                the verdict must be JSON with a `decision` field — the engine's own contract.
+              context: [runtime]
+              exit_status: 0
+              command: |
+                  set -euo pipefail
+                  if [ -z "${OLLAMA_API_KEY:-}" ]; then
+                    echo "SKIP: OLLAMA_API_KEY absent — the review was NOT exercised"
+                    exit 0
+                  fi
+                  cd /tmp/fixture
+                  base="$(git rev-parse HEAD~1)"
+                  out="$(CLAWSWEEPER_TARGET_REPO=opencharly/fixture BASE_SHA="$base" TARGET_DIR=/tmp/fixture clawsweeper-review)"
+                  printf '%s\n' "$out" | jq -e '.decision' >/dev/null
+                  echo REVIEW-VERDICT-OK
+        description: |
+            R10 proof of the review image: the engine converges, accepts an opencharly/* target
+            through the profile overlay, and produces a JSON verdict on a defect it can see.
