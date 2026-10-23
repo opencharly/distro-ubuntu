@@ -26,6 +26,10 @@ clawsweeper-review:
             OpenCharly Ollama Cloud responses endpoint. Built for `--local-range`: no token, no
             GitHub writes, read-only target tree.
         candy:
-            # Pinned by commit: the layer's tag is written by tag-on-merge at first merge; a
-            # commit pin is the same immutable artefact and does not wait on tag delivery.
-            - '@github.com/opencharly/layer-clawsweeper/candy/clawsweeper-review:a9f48c9d4483370b4ef495c0d809c8fb17a71fbe'
+            # Pinned by the layer's release tag, like every other @github ref in this repo.
+            # It names the merge that fixed the skill node's two-sources-of-truth
+            # `description:` — the inline copy disagreed with the SKILL.md frontmatter, and
+            # the corpus generator refuses that, so the whole marketplace corpus could not
+            # be generated while this box held the pre-fix commit. A tag pin is also the
+            # form `charly box reconcile` realigns; a commit pin is invisible to it.
+            - '@github.com/opencharly/layer-clawsweeper/candy/clawsweeper-review:v2026.296.1202'
