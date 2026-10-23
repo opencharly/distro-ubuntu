@@ -235,7 +235,7 @@ githubrunner-ubuntu-vmi-pool:
             pull_policy: Always
             disk_path_in_image: /disk/disk.img
         run_strategy: Always
-        memory: 16G
+        memory: 20G
         cpu:
             cores: 6
         machine: q35
