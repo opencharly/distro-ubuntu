@@ -1,0 +1,31 @@
+# The ClawSweeper review image. It is a one-shot tool, not a service: a caller runs it with the
+# PR tree mounted read-only and no GitHub token, and posts the JSON verdict itself.
+clawsweeper-review:
+    candy:
+        base: ubuntu:24.04
+        # `distro:` is what makes the generator emit the distro BOOTSTRAP package install,
+        # and it is not optional decoration: `ubuntu:24.04` ships neither `curl` nor `wget`,
+        # while the bootstrap block ALWAYS downloads go-task with `curl || wget`. Without
+        # this declaration the build dies on `curl: not found` at bootstrap — measured on
+        # this box, whose first build failed exactly there.
+        build:
+            - deb
+        # BOTH tags, exactly like `box/ubuntu`: the `ubuntu:24.04` entry selects the embedded
+        # distro vocabulary (the apt bootstrap), and the bare `ubuntu` tag is what a layer's
+        # `distro: ubuntu:` SECTION is matched against. With the version tag alone the
+        # bootstrap ran but the candy's package list was silently never installed — measured:
+        # the Node install died on `tar (child): xz: Cannot exec`, because `xz-utils` from that
+        # list was never there.
+        distro:
+            - ubuntu:24.04
+            - ubuntu
+        platform:
+            - linux/amd64
+        description: |
+            The ClawSweeper review engine (pinned upstream, Node 24 + pnpm, Codex 0.162.1) on the
+            OpenCharly Ollama Cloud responses endpoint. Built for `--local-range`: no token, no
+            GitHub writes, read-only target tree.
+        candy:
+            # Pinned by commit: the layer's tag is written by tag-on-merge at first merge; a
+            # commit pin is the same immutable artefact and does not wait on tag delivery.
+            - '@github.com/opencharly/layer-clawsweeper/candy/clawsweeper-review:2524e36063a17ca7f78058d656acabcb53b8725c'
