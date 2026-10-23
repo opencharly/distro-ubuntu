@@ -352,11 +352,15 @@ github-runner-ubuntu:
             # test classified the engine as podman. The four per-unit drop-ins this recipe
             # used to carry had the same effect and were removed for the same reason.
             #
-            # A WARM GO CACHE, SHARED BY THIS VM's runners. The org's workflows pin
+            # A WARM MODULE CACHE, SHARED BY THIS VM's runners. The org's workflows pin
             # `cache: false` for setup-go, so every job otherwise re-downloads the module
-            # graph and recompiles the world; four runners per VM sharing one build/module
-            # cache turns the second and later jobs on that VM warm. Go's build cache is
-            # safe to share across concurrent builds. This is runner-side state (never a
+            # graph; downloading it once per VM turns later jobs warm.
+            #
+            # GOCACHE IS DELIBERATELY NOT OVERRIDDEN. Relocating the BUILD cache to a shared,
+            # persistent directory produced `panic: could not look up runtime.mapinitnoop`
+            # in the Go linker on one coverage job — the build cache is the component whose
+            # entries must match the exact toolchain, so it stays per-job (Go's default under
+            # the runner user). The module cache is immutable content and safe to share. This is runner-side state (never a
             # DOCKER_HOST or any other value that changes what a job observes), written to
             # the runner tree's `.env`, which the Actions runner sources at start.
             - run: "create the shared Go cache directories"
@@ -375,7 +379,6 @@ github-runner-ubuntu:
               mode: "0644"
               content: |
                   GOPATH=/var/cache/charly/go/path
-                  GOCACHE=/var/cache/charly/go/build
                   GOMODCACHE=/var/cache/charly/go/mod
             # The label set used to live in two files (`/etc/charly-runner-labels` and
             # `-org`), a second source that could drift from the registration command.
@@ -426,7 +429,6 @@ github-runner-ubuntu:
               context: [runtime]
               command: |
                   set -euo pipefail
-                  grep -qx 'GOCACHE=/var/cache/charly/go/build' /home/ubuntu/actions-runner-base/.env
                   grep -qx 'GOMODCACHE=/var/cache/charly/go/mod' /home/ubuntu/actions-runner-base/.env
                   test -d /var/cache/charly/go/build
             - check: the runner tree carries NO DOCKER_HOST override, so jobs see the default socket
