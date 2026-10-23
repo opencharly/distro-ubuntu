@@ -252,13 +252,14 @@ githubrunner-ubuntu-vmi-pool:
             charly_install:
                 strategy: auto
         description: >-
-            The CI-runner Ubuntu VM on a KubeVirt substrate. This TEMPLATE authors only the boot
-            medium and the domain shape; the recipe is applied by its deploy,
-            check-githubrunner-ubuntu-vmi, which composes candy/github-runner-ubuntu through
-            add_candy. It cannot be composed here: a venue-bearing kubevirt node is classified as
-            a template by the loader, and templates reject add_candy.
-
-
+            The CI POOL runner: 6 vCPU / 16 GB, the size the org's self-hosted fleet is built
+            from. It is applied by the LOCAL CI overlay (13 deploys of this template, two runners
+            each = 26 concurrent slots), never by an in-repo bed — so this entity has no
+            `deploy:`/bed sibling here on purpose. It exists because a kubevirt deploy cannot
+            override a `from:` template's `cpu`/`memory`, so a fleet size has to be a template.
+            Its recipe is the base `githubrunner-ubuntu-vmi` body with only the size changed:
+            same disk image, same cloud-init, same `add_candy: github-runner-ubuntu` at deploy
+            time.
 # The KubeVirt bed. Unlike the libvirt bed this does NOT restate the recipe: it composes the
 # SAME candy onto the SAME entity through add_candy, which is what makes one recipe serve both
 # substrates. disposable: true is the authorization for the destroy/rebuild path it exercises.
