@@ -357,35 +357,35 @@ github-runner-ubuntu:
             # graph; downloading it once per VM turns later jobs warm.
             #
             # GOCACHE IS DELIBERATELY NOT OVERRIDDEN. Relocating the BUILD cache to a custom
-            # persistent path (/var/cache/charly/go/build, created root-side) produced
+            # persistent path (created root-side) produced
             # `panic: could not look up runtime.mapinitnoop` in the Go linker on one coverage
             # job, and the surrounding ownership change also broke `actions/setup-go`'s post
             # step. Go's DEFAULT build cache is per-USER (~/.cache/go-build), shared by every
             # runner on this VM and across runs — that sharing is normal and content-addressed,
             # so it is left alone; what is removed is the custom path and its ownership. The
-            # module cache is immutable content and stays shared under /var/cache/charly/go. This is runner-side state (never a
+            # module cache is immutable content and lives under the RUNNER USER's home,
+            # /home/ubuntu/.cache/charly/go — no root-owned parent and no chown of a shared
+            # root directory. This is runner-side state (never a
             # DOCKER_HOST or any other value that changes what a job observes), written to
             # the runner tree's `.env`, which the Actions runner sources at start.
             - run: "create the shared Go cache directories"
               id: "go-cache-dirs"
-              run_as: root
+              # Created AS THE RUNNER USER, under its own home: no root-owned cache parent and
+              # no chown of a shared root directory. actions/setup-go's post step can create
+              # whatever it needs inside a directory it already owns.
+              run_as: ubuntu
               context: [deploy]
               command: |
-                  # The PARENT must be writable by the runner user too: actions/setup-go's
-                  # post step creates a directory under it and fails EACCES otherwise, which
-                  # fails an otherwise-green aggregate job.
-                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly
-                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go
-                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/mod
-                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/path
+                  install -d -m 0755 "/home/ubuntu/.cache/charly/go/mod"
+                  install -d -m 0755 "/home/ubuntu/.cache/charly/go/path"
             - run: "write the runner .env with the shared Go cache paths"
               id: "file-runner-go-env"
               write: "/home/ubuntu/actions-runner-base/.env"
               run_as: ubuntu
               mode: "0644"
               content: |
-                  GOPATH=/var/cache/charly/go/path
-                  GOMODCACHE=/var/cache/charly/go/mod
+                  GOPATH=/home/ubuntu/.cache/charly/go/path
+                  GOMODCACHE=/home/ubuntu/.cache/charly/go/mod
             # The label set used to live in two files (`/etc/charly-runner-labels` and
             # `-org`), a second source that could drift from the registration command.
             # `charly-register-runners` takes `RUNNER_LABELS` directly, so the files are
@@ -435,7 +435,7 @@ github-runner-ubuntu:
               context: [runtime]
               command: |
                   set -euo pipefail
-                  grep -qx 'GOMODCACHE=/var/cache/charly/go/mod' /home/ubuntu/actions-runner-base/.env
+                  grep -qx 'GOMODCACHE=/home/ubuntu/.cache/charly/go/mod' /home/ubuntu/actions-runner-base/.env
                   # NEGATIVE assertion: a future edit that re-introduces the GOCACHE override
                   # must fail the build, not silently return to the state that panicked.
                   ! grep -q '^GOCACHE=' /home/ubuntu/actions-runner-base/.env
