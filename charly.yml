@@ -236,6 +236,10 @@ githubrunner-ubuntu-vmi-2vcpu:
         memory: 4G
         cpu:
             cores: 2
+            # host-passthrough exposes the host CPU definition, including its
+            # virtualisation features (svm on AMD, vmx on Intel); the guest measured
+            # under the default host-model carried neither.
+            model: host-passthrough
         machine: q35
         # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
         # bios default would boot nothing.
@@ -286,6 +290,10 @@ githubrunner-ubuntu-vmi-8vcpu:
         memory: 20G
         cpu:
             cores: 8
+            # host-passthrough exposes the host CPU definition, including its
+            # virtualisation features (svm on AMD, vmx on Intel); the guest measured
+            # under the default host-model carried neither.
+            model: host-passthrough
         machine: q35
         # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
         # bios default would boot nothing.
@@ -336,6 +344,10 @@ githubrunner-ubuntu-vmi-16vcpu:
         memory: 32G
         cpu:
             cores: 16
+            # host-passthrough exposes the host CPU definition, including its
+            # virtualisation features (svm on AMD, vmx on Intel); the guest measured
+            # under the default host-model carried neither.
+            model: host-passthrough
         machine: q35
         # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
         # bios default would boot nothing.
@@ -386,6 +398,10 @@ githubrunner-ubuntu-vmi-32vcpu:
         memory: 60G
         cpu:
             cores: 32
+            # host-passthrough exposes the host CPU definition, including its
+            # virtualisation features (svm on AMD, vmx on Intel); the guest measured
+            # under the default host-model carried neither.
+            model: host-passthrough
         machine: q35
         # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
         # bios default would boot nothing.
