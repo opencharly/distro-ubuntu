@@ -781,46 +781,66 @@ githubrunner-ubuntu-skill:
             - "A CI lane failing on a self-hosted Ubuntu runner (docker daemon, disk, buildx builder)"
 
 # The ClawSweeper review bed. A disposable pod runs the image against a TWO-COMMIT fixture
-# whose second commit introduces a deliberate defect, and asserts that the engine returns a
-# JSON verdict. The model call is a LIVE service: without OLLAMA_API_KEY the step prints SKIP
-# and exits 0 — visibly not exercised, never mocked (R8).
+# whose second commit introduces a deliberate defect, and asserts that the engine loads and
+# reaches the model boundary. A check bed exports NO secret, so the model leg cannot run here;
+# it is never mocked either (R8) — the live round-trip is the advisory workflow's job, where
+# the org key exists.
 check-clawsweeper-review-pod:
     pod:
         image: clawsweeper-review
         disposable: true
         lifecycle: dev
         plan:
-            - run: "create the two-commit fixture the review is asked to judge"
-              context: [deploy]
-              command: |
-                  set -euo pipefail
-                  rm -rf /tmp/fixture && mkdir -p /tmp/fixture && cd /tmp/fixture
-                  git init -q -b main
-                  git config user.email fixture@example.invalid
-                  git config user.name fixture
-                  printf 'def add(a, b):\n    return a + b\n' > calc.py
-                  git add calc.py && git -c user.email=fixture@example.invalid commit -qm "base: add() adds"
-                  printf 'def add(a, b):\n    return a - b\n' > calc.py
-                  git add calc.py && git -c user.email=fixture@example.invalid commit -qm "defect: add() subtracts"
-            - check: the review returns a JSON verdict, or skips visibly without a model key
+            - check: the entrypoint runs the engine to a report and never dies on its own permissions
               id: review-verdict
               description: |
-                Runs the real entrypoint over the fixture. A missing OLLAMA_API_KEY prints SKIP
-                and exits 0: the check is not exercised then, and the log says so. With a key,
-                the verdict must be JSON with a `decision` field — the engine's own contract.
+                A check bed exports NO secret, so `OLLAMA_API_KEY` can never resolve here (the
+                runner resolves only its own auto-exported variables — a key guard in a check
+                step is a DEAD assertion), and the model leg is therefore not exercised in this
+                bed. It is never faked either (R8). What IS proven: the fixture exists, the
+                entrypoint's flag contract holds, `jq` is present, the engine reaches the model
+                boundary, and nothing fails on the image's own permissions.
               context: [runtime]
               exit_status: 0
               command: |
                   set -euo pipefail
-                  if [ -z "${OLLAMA_API_KEY:-}" ]; then
-                    echo "SKIP: OLLAMA_API_KEY absent — the review was NOT exercised"
-                    exit 0
+                  # A check step prepares its own input: a `run:` step is SKIPPED in
+                  # verify-only mode (measured: "skipped — verify-only mode (mutating step)").
+                  rm -rf /tmp/fixture && mkdir -p /tmp/fixture
+                  git init -q -b main /tmp/fixture
+                  git -C /tmp/fixture config user.email fixture@example.invalid
+                  git -C /tmp/fixture config user.name fixture
+                  printf 'def add(a, b):\n    return a + b\n' > /tmp/fixture/calc.py
+                  git -C /tmp/fixture add calc.py
+                  git -C /tmp/fixture commit -qm "base: add() adds"
+                  printf 'def add(a, b):\n    return a - b\n' > /tmp/fixture/calc.py
+                  git -C /tmp/fixture add calc.py
+                  git -C /tmp/fixture commit -qm "defect: add() subtracts"
+
+                  command -v clawsweeper-review
+                  help="$(clawsweeper-review --help)"
+                  printf '%s\n' "$help" | grep -q -- '--local-range'
+                  printf '%s\n' "$help" | grep -q -- '--result-format json'
+                  jq --version
+
+                  base="$(git -C /tmp/fixture rev-parse HEAD~1)"
+                  out="$(CLAWSWEEPER_TARGET_REPO=opencharly/fixture BASE_SHA="$base" TARGET_DIR=/tmp/fixture clawsweeper-review 2>&1 || true)"
+                  printf '%s\n' "$out" | tail -3
+
+                  # The regression that killed every review: an unwritable CODEX_HOME dies at
+                  # "failed to initialize in-process app-server client: Permission denied"
+                  # before the model is reached.
+                  if printf '%s\n' "$out" | grep -q 'Permission denied'; then
+                    echo "the engine died on the image's own permissions"
+                    exit 1
                   fi
-                  cd /tmp/fixture
-                  base="$(git rev-parse HEAD~1)"
-                  out="$(CLAWSWEEPER_TARGET_REPO=opencharly/fixture BASE_SHA="$base" TARGET_DIR=/tmp/fixture clawsweeper-review)"
-                  printf '%s\n' "$out" | jq -e '.decision' >/dev/null
-                  echo REVIEW-VERDICT-OK
+                  # It reached the model boundary: a report was produced. NO key-shaped
+                  # assertion — the check must not depend on the key being ABSENT, which is
+                  # the trap the layer's own runtime check was blocked for.
+                  printf '%s\n' "$out" | grep -q '"reports"'
+                  echo REVIEW-ENGINE-REACHED-MODEL-BOUNDARY
         description: |
             R10 proof of the review image: the engine converges, accepts an opencharly/* target
-            through the profile overlay, and produces a JSON verdict on a defect it can see.
+            through the profile overlay, and reaches the model boundary. The live model
+            round-trip needs a key, which a check bed cannot supply — that leg is the advisory
+            workflow's job (opencharly/.github `clawsweeper-review.yml`).
