@@ -259,6 +259,17 @@ github-runner-ubuntu:
               context: [deploy]
               command: |
                   usermod -aG docker ubuntu
+            # Nested virtualisation: with `cpu.model: host-passthrough` the guest's own
+            # kernel exposes svm/vmx and creates /dev/kvm. The node is root:kvm 0660, so
+            # the runner user needs the kvm group to open it from a job, and this runs
+            # before the runner service starts so the service picks the group up.
+            - run: "step 9b \u2014 usermod -aG kvm ubuntu (nested virtualisation)"
+              id: "cmd-09b-usermod-ag-kvm-ubuntu"
+              run_as: root
+              context: [deploy]
+              command: |
+                  groupadd -f kvm
+                  usermod -aG kvm ubuntu
             - run: "step 10 \u2014 systemctl disable --now docker.service docker.socket || true"
               id: "cmd-10-systemctl-disable-now-docker-service-doc"
               run_as: root
@@ -515,6 +526,26 @@ github-runner-ubuntu:
               command: |
                   set -euo pipefail
                   skopeo --version
+            # Nested virtualisation. A host-passthrough CPU makes the guest's own kernel
+            # expose svm/vmx and create /dev/kvm (the host-device route is not involved;
+            # measured: KubeVirt rejects `hostDevices` without its Alpha gate and the
+            # address pools are PCI/MDEV/USB only). The check asserts the RESULT — the
+            # runner user can actually open the device — and stays silent on a substrate
+            # whose CPU does not expose virtualisation.
+            - check: the runner user can open /dev/kvm when the CPU exposes virtualisation
+              id: check-kvm-device
+              run_as: root
+              context: [runtime]
+              command: |
+                  set -euo pipefail
+                  id -nG ubuntu | tr ' ' '\n' | grep -qx kvm
+                  if grep -q -m1 -ow 'svm\|vmx' /proc/cpuinfo; then
+                    test -c /dev/kvm
+                    sudo -u ubuntu test -w /dev/kvm
+                    echo kvm-device-ok
+                  else
+                    echo kvm-device-skipped-no-virt-cpu
+                  fi
             # The k3s lanes `sudo modprobe br_netfilter` and set the bridge sysctl. Both are
             # host-root operations, so the image performs them at boot and this asserts the
             # RESULT — module loaded and the sysctl value actually in force.
