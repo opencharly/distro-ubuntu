@@ -368,6 +368,10 @@ github-runner-ubuntu:
               run_as: root
               context: [deploy]
               command: |
+                  # The PARENT must be writable by the runner user too: actions/setup-go's
+                  # post step creates a directory under it and fails EACCES otherwise, which
+                  # fails an otherwise-green aggregate job.
+                  install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly
                   install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go
                   install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/build
                   install -d -m 0755 -o ubuntu -g ubuntu /var/cache/charly/go/mod
