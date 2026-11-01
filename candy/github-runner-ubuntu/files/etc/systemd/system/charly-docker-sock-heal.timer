@@ -1,0 +1,7 @@
+[Unit]
+Description=Periodically restore a dangling /var/run/docker.sock
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=30s
+[Install]
+WantedBy=timers.target

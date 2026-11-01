@@ -1,0 +1,99 @@
+---
+name: githubrunner-ubuntu
+description: |-
+  The CI-runner Ubuntu VM (kind:vm, cloud_image noble) — the fleet substrate that
+  runs the Blacksmith-shaped CI of opencharly/openclaw-enterprise on host `no`,
+  with a rootful Docker daemon pinned to the version the CI asserts, a
+  co-tenant-safe daemon/socket split for several runners on one host, a docker
+  store GC, and the disposable `check-githubrunner-ubuntu-vm` R10 bed.
+  MUST be invoked before editing `githubrunner-ubuntu`, its cloud-init recipe, or
+  its bed — and before troubleshooting a CI job that fails on a runner.
+---
+
+# githubrunner-ubuntu
+
+The `kind: vm` entity behind the Ubuntu half of the org's self-hosted CI
+fleet. Boots the upstream noble cloud image under libvirt/QEMU (UEFI
+insecure, q35) and provisions, through cloud-init, a rootful Docker daemon
+that several concurrent CI runners can share safely.
+
+> **Lives in `opencharly/distro-ubuntu`.** The CachyOS half of the fleet —
+> the rootless `box/githubrunner` pods and their `check-githubrunner-pod` bed
+> — lives in `opencharly/distro-cachyos`.
+
+## Why a VM, and why the recipe is shaped this way
+
+The Blacksmith-shaped CI of `opencharly/openclaw-enterprise` needs a rootful
+Docker daemon, **privileged k3s node containers** with `br_netfilter` on the
+node kernel, **systemd** (`sudo systemctl stop docker.service`) and **apt +
+passwordless sudo**. A rootless pod has none of those, on any image.
+
+Those workflows are also written for **one job per machine** — their runners
+are per-job VMs. This VM packs four runners onto one host, so every unusual
+piece of the recipe exists to make that co-tenancy safe, and each was measured
+on the live fleet (2026-10-10):
+
+| Piece | The failure it prevents |
+|---|---|
+| Docker pinned to `29.4.0` (`docker-ce=5:29.4.0-…`) and `apt-mark hold` | `setup-test-docker` asserts `docker version = 29.4.0`; a drifted daemon fails that lane and can fail version-sensitive tests |
+| The daemon runs as `docker-ci.service` on `/run/docker-ci.sock`, stock `docker.service`/`docker.socket` inactive | a lane's `systemctl stop docker.service docker.socket` killed the co-tenant daemon: measured 14:07:16 stop → 14:07:28 `buildx create` → *Cannot connect to the Docker daemon* |
+| `/var/run/docker.sock` kept as a symlink to the real socket | lanes, helpers and tests hardcode or mount that path (`runtime-image-fixture.mjs`, `docker-compute-token-retry`, production-compose mounts) |
+| **No `DOCKER_HOST` override** in the runner tree | a job must see the same default socket a hosted runner does. Setting it changed observed behaviour: `TestCreateContainerCanMountDockerSocket` stopped mounting `/var/run/docker.sock` and the scope test read the engine as podman. Co-tenancy is protected by the socket symlink + heal timer instead |
+| `charly-docker-sock-heal.timer` (30 s) | repairs a `/var/run/docker.sock` left dangling by such a lane, without fighting one that legitimately relinked it |
+| `charly-docker-store-gc.timer` (10 min) | every `setup-buildx-action` leaves a RUNNING buildkit builder container with its own cache volume; cancelled lanes leak them — 13 held 84 GB and filled the disk to 100 %. It also repairs the stale docker context/buildx selection such a lane leaves pointing at its deleted job directory (which breaks every later `docker` CLI call that does not set `DOCKER_HOST`) |
+| `journald` capped at 200 MB | a log flood cannot fill the disk |
+| 128 GiB disk, 32 GiB RAM, 16 vCPU, 8 GiB swapfile | four concurrent lanes peaked at ~12 GiB on a 15 GiB VM and produced 44 GiB of docker state on a 61 GiB disk |
+
+## Registration is token-guarded (one operator step)
+
+The candy installs the runner tree at `/home/ubuntu/actions-runner-base` and
+`/usr/local/sbin/charly-register-runners`. **Registration is deliberately not
+automated** — a registration token lives one hour and is never committed — and
+it is not a candy `post_enable` hook either: only the pod deploy plugin executes
+candy lifecycle hooks, so a hook here would never run on a VM or KubeVirt
+substrate. ONE parameterised script replaces the per-runner incantations:
+
+```bash
+TOKEN=$(gh api -X POST /orgs/<org>/actions/runners/registration-token --jq .token)
+charly shell ubuntu.ci-runner-vm-1 -c \
+  "sudo env RUNNER_ORG=<org> RUNNER_TOKEN='$TOKEN' \
+     RUNNER_LABELS=ubuntu-latest,opencharly \
+     RUNNER_NAME_PREFIX=charly-ci RUNNER_COUNT=4 \
+     /usr/local/sbin/charly-register-runners"
+```
+
+| Env | Default | Meaning |
+|---|---|---|
+| `RUNNER_URL` | — | repo scope, `https://github.com/<owner>/<repo>` |
+| `RUNNER_ORG` | — | org scope shorthand, `opencharly` (ignored when `RUNNER_URL` is set) |
+| `RUNNER_TOKEN` | required | registration token; a REMOVE token with `--remove` |
+| `RUNNER_LABELS` | `opencharly` | what a job's `runs-on:` selects |
+| `RUNNER_NAME_PREFIX` | `charly-githubrunner-ubuntu` | each runner is `<prefix>-<n>` |
+| `RUNNER_COUNT` | `4` | runner services on this guest |
+| `RUNNER_USER` | `ubuntu` | runner user / home owner |
+
+**Scope decides the blast radius.** An **org-scoped** runner carrying a GitHub-hosted
+label (`ubuntu-latest`) is matched by EVERY repository in the org — that is deliberate
+here: it is what lets every repository keep its existing workflow unchanged, and the
+Default runner group is already `visibility: all` with `allows_public_repositories: true`.
+A **repo-scoped** runner (`RUNNER_URL`) serves only one repository and is the right choice
+when the intent is a single project rather than the whole org. Narrow an org-wide fleet
+with `RUNNER_GROUP` and a repo selection if the wider trade is no longer wanted.
+
+`--remove` deregisters and stops the units. The script is idempotent: `.runner`
+in a runner root means "already registered", so a re-run neither replaces nor
+re-registers. A fleet that must serve the Blacksmith-shaped workflows passes
+their label set explicitly, e.g.
+`RUNNER_LABELS=opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vcpu-ubuntu-2404,blacksmith-32vcpu-ubuntu-2404`.
+
+## R10 gate
+
+```bash
+charly check run check-githubrunner-ubuntu-vm
+```
+
+The bed proves the pinned Docker version, the daemon/socket split, the symlink
+and the ABSENCE of a `DOCKER_HOST` override in the runner tree, co-tenant isolation under a
+simulated lane mutation, the store GC collecting a leaked running container plus
+its volume, the runner tree and the registration script, the timers and the
+sizing. It registers no runner and needs no secret.

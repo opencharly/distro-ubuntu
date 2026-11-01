@@ -73,6 +73,52 @@ import: []
 #   * 128 GiB disk / 32 GiB RAM / 16 vCPU / 8 GiB swapfile: sized from live measurements
 #     of four concurrent lanes (peak ~12 GiB on the 15 GiB original, 44 GiB of docker
 #     state on the 61 GiB original).
+# The external cluster this recipe's KubeVirt substrate deploys onto. ONE place holds the
+# cluster-specific knobs, so the entity below names a profile instead of hardcoding a venue.
+# The boot disk for the KubeVirt form. A data_volume+http source CANNOT work on quant-dev: the CDI
+# importer there cannot open its block device (`blockdev: cannot open /dev/cdi-block-volume:
+# Permission denied`, measured), so deploy-add times out waiting on a DataVolume that never becomes
+# ready. A container_disk fed by a disk CHARLY builds and pushes is the arm this cluster supports, and
+# it is also the one that keeps the whole configuration charly.yml-only.
+githubrunner-ubuntu-disk:
+    vm:
+        source:
+            kind: cloud_image
+            distro: ubuntu
+            url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+            base_user: ubuntu
+        disk_size: 128G
+        ram: 4G
+        cpu: 2
+        machine: q35
+        firmware: uefi-insecure
+        # REQUIRED, not decoration: without this the baked disk carries no authorized key, the
+        # KubeVirt deploy cannot reach the guest over the substrate's port-forward, and the candy
+        # walk stalls with no output until the bed times out. Measured by diffing this entity
+        # against the P4 spike's ubuntu-runner-disk, which had exactly these fields and worked.
+        ssh:
+            user: ubuntu
+            port_auto: true
+            key_source: generate
+        cloud_init:
+            timezone: UTC
+            # The guest agent is what lets the substrate reach into a booted VM. Without it
+            # KubeVirt never reports AgentConnected, charly never opens the managed
+            # port-forward, and the deploy sits in deploy-add with no output until it times
+            # out. Baked into the disk so it is present on every boot, not just the first.
+            package:
+                - qemu-guest-agent
+            charly_install:
+                strategy: auto
+
+quant-dev:
+    kubernetes:
+        kubeconfig_context: kubernetes-admin@quant-dev
+        default_namespace: default
+        admission_policy: privileged
+        storage:
+            class_default: csi-cinder-high-speed-gen2
+
 githubrunner-ubuntu:
     vm:
         source:
@@ -89,338 +135,15 @@ githubrunner-ubuntu:
         firmware: uefi-insecure
         network: {mode: user}
         ssh: {user: ubuntu, port_auto: true, key_source: generate}
+        # The recipe — Docker, the co-tenant daemon split, both timers, the store GC, the
+        # runner tree — is NOT here any more. It is `candy/github-runner-ubuntu`, one
+        # canonical home composed by the deploy of each substrate's bed --
+        # check-githubrunner-ubuntu-vm via add_candy on this box, and
+        # check-githubrunner-ubuntu-vmi via add_candy on the KubeVirt template -- so the same
+        # recipe serves both substrates instead of being re-authored per substrate
+        # (decision D1, issue 37).
         cloud_init:
             timezone: UTC
-            package:
-                - git
-                - curl
-                - jq
-                - unzip
-                - zip
-                - rsync
-                - tree
-                - build-essential
-                - pkg-config
-                - python3
-                - python3-pip
-                - python3-venv
-                - ca-certificates
-                - gnupg
-                - apt-transport-https
-                - qemu-guest-agent
-                - libicu74
-                - libkrb5-3
-                - libssl3t64
-                - libunwind8
-                - liblttng-ust1t64
-                - shellcheck
-                - bc
-                - less
-                - lsof
-                - strace
-                - netcat-openbsd
-                - dnsutils
-                - ripgrep
-                - moreutils
-                - slirp4netns
-                - uidmap
-                - fuse-overlayfs
-            write_files:
-                - path: /etc/systemd/system/docker-ci.service
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Unit]
-                    # OpenCharly CI Docker daemon. Deliberately NOT docker.service:
-                    # the logging-collector lane runs
-                    # `systemctl stop docker.service docker.socket`, which must not
-                    # stop the daemon every co-tenant lane is using (RCA 2026-10-10).
-                    Description=OpenCharly CI Docker daemon (co-tenant-safe)
-                    After=network-online.target containerd.service
-                    Wants=network-online.target
-
-                    [Service]
-                    Type=notify
-                    # Own socket path: a lane that relinks /var/run/docker.sock must
-                    # not be able to redirect this daemon's own socket.
-                    ExecStart=/usr/bin/dockerd -H unix:///run/docker-ci.sock --containerd=/run/containerd/containerd.sock
-                    ExecReload=/bin/kill -s HUP $MAINPID
-                    TimeoutStartSec=0
-                    Restart=always
-                    RestartSec=2
-                    LimitNOFILE=infinity
-                    LimitNPROC=infinity
-                    Delegate=yes
-                    KillMode=process
-
-                    [Install]
-                    WantedBy=multi-user.target
-                - path: /usr/local/sbin/charly-docker-sock-heal
-                  owner: root:root
-                  perms: "0755"
-                  content: |
-                    #!/bin/sh
-                    # Restore ONLY a dangling /var/run/docker.sock, so a lane that
-                    # legitimately relinked it keeps working while it runs.
-                    t=$(readlink -f /var/run/docker.sock 2>/dev/null)
-                    [ -n "$t" ] && [ -S "$t" ] && exit 0
-                    ln -sfn /run/docker-ci.sock /var/run/docker.sock
-                - path: /etc/systemd/system/charly-docker-sock-heal.service
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Unit]
-                    Description=Restore /var/run/docker.sock after a CI lane left it dangling
-                    [Service]
-                    Type=oneshot
-                    ExecStart=/usr/local/sbin/charly-docker-sock-heal
-                - path: /etc/systemd/system/charly-docker-sock-heal.timer
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Unit]
-                    Description=Periodically restore a dangling /var/run/docker.sock
-                    [Timer]
-                    OnBootSec=60s
-                    OnUnitActiveSec=30s
-                    [Install]
-                    WantedBy=timers.target
-                - path: /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-1.service.d/docker-host.conf
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Service]
-                    Environment=DOCKER_HOST=unix:///run/docker-ci.sock
-                - path: /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-2.service.d/docker-host.conf
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Service]
-                    Environment=DOCKER_HOST=unix:///run/docker-ci.sock
-                - path: /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-3.service.d/docker-host.conf
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Service]
-                    Environment=DOCKER_HOST=unix:///run/docker-ci.sock
-                - path: /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-4.service.d/docker-host.conf
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Service]
-                    Environment=DOCKER_HOST=unix:///run/docker-ci.sock
-                - path: /usr/local/sbin/charly-docker-store-gc
-                  owner: root:root
-                  perms: "0755"
-                  content: |
-                    #!/bin/sh
-                    # OpenCharly CI VM docker store GC (v2).
-                    #
-                    # Collects what the CI's own workflows leak on a SHARED, long-lived host. The
-                    # workflows assume one job per machine, where every job's container dies with the
-                    # machine; here four runners share one daemon and one store, so nothing collects:
-                    #   * every `docker/setup-buildx-action` starts a buildkit builder container with its
-                    #     own anonymous cache volume (~5-7 GB). A lane that is cancelled, times out, or
-                    #     whose runner restarts leaves it RUNNING, so `docker container prune` can never
-                    #     remove it. Measured 2026-10-10: 13 such builders held 84 GB and filled the guest
-                    #     disk to 100%, after which lanes failed with ENOSPC and their logs were no longer
-                    #     uploadable (BlobNotFound in Jobs that never touched docker).
-                    #   * a lane also leaves the ubuntu user's docker context + buildx selection pointing
-                    #     at its deleted job directory, which breaks every later docker CLI call that does
-                    #     not set DOCKER_HOST — including the cleanup commands that would have helped.
-                    #
-                    # Safety rule: the ONLY builders this may remove while lanes run are (a) those whose
-                    # endpoint socket no longer exists (their owning job is gone by construction) and
-                    # (b) the surplus above the number of ACTIVE runner jobs, oldest LAST-ACTIVITY first —
-                    # an actively building builder updates its activity file continuously, so it is never
-                    # the oldest. When no job is running, nothing is in use and everything is collected.
-                    HOST=unix:///run/docker-ci.sock
-                    BX=/home/ubuntu/.docker/buildx
-                    D() { docker --host "$HOST" "$@"; }
-                    # buildx state (instances/, activity/, current) lives in the RUNNER USER's home, so
-                    # every buildx verb must run as that user or it reads root's empty state.
-                    DB() { sudo -u ubuntu docker --host "$HOST" "$@"; }
-                    # EVERY builder buildx knows about, except the built-in `default` docker-driver one:
-                    # keying on the name shape `builder-<hex>` that setup-buildx-action generates missed
-                    # every builder a lane created under any other name (measured in the R10 bed).
-                    builder_names() {
-                      DB buildx ls 2>/dev/null | awk '{print $1}' | grep -vE '^(NAME/NODE|\\_|$)' | sed 's/\*$//' | grep -vx default
-                    }
-                    CFG=/home/ubuntu/.docker/config.json
-
-                    # 1. repair CLI state a CI lane left pointing at a deleted job directory
-                    if [ -f "$CFG" ]; then
-                      ctx=$(python3 -c 'import json;print(json.load(open("'"$CFG"'")).get("currentContext","default"))' 2>/dev/null)
-                      if [ -n "$ctx" ] && [ "$ctx" != "default" ] && ! docker context inspect "$ctx" >/dev/null 2>&1; then
-                        python3 - "$CFG" <<'PY'
-                    import json,sys
-                    p=sys.argv[1]; d=json.load(open(p)); d["currentContext"]="default"
-                    json.dump(d,open(p,"w"),indent="\t")
-                    PY
-                        echo "gc: reset stale docker context '$ctx' -> default"
-                      fi
-                    fi
-                    if [ -f "$BX/current" ]; then
-                      name=$(python3 -c 'import json;print(json.load(open("'"$BX"'/current")).get("Name",""))' 2>/dev/null)
-                      if [ -n "$name" ] && ! DB buildx inspect "$name" >/dev/null 2>&1; then
-                        rm -f "$BX/current"
-                        echo "gc: cleared stale buildx selection '$name'"
-                      fi
-                    fi
-
-                    # count by process NAME: `pgrep -f` would also match any shell whose command line
-                    # merely mentions the string (a lane grepping for it, or this very check), inflating
-                    # the count and making the surplus rule keep leaks.
-                    # Thresholds are overridable so the bed can drive each purge branch deterministically
-                    # (defaults are the production values; 0 disables the age floor and skips the filter,
-                    # because docker rejects a zero `until=`).
-                    MIN_AGE=${CHARLY_GC_MIN_AGE:-20m}
-                    PRESSURE_AGE=${CHARLY_GC_PRESSURE_AGE:-70m}
-                    PRESSURE_PCT=${CHARLY_GC_PRESSURE_PCT:-80}
-                    jobs=$(pgrep -xc Runner.Worker 2>/dev/null || true)
-                    jobs=${jobs:-0}
-                    use=$(df --output=pcent / | tail -1 | tr -dc '0-9')
-
-                    # 2. builders whose endpoint socket is gone: their job is gone by construction
-                    for n in $(builder_names); do
-                      # trim: `buildx inspect` pads the endpoint with spaces, and an untrimmed value
-                      # makes the -S test false for EVERY builder (measured: it deleted 15 builders
-                      # including two live lanes' — the bug that made this rule dangerous).
-                      ep=$(DB buildx inspect "$n" 2>/dev/null | awk -F'Endpoint: ' '/Endpoint:/{print $2; exit}' | tr -d " ")
-                      sock=${ep#unix://}
-                      [ -z "$sock" ] && continue
-                      if [ -n "$sock" ] && [ ! -S "$sock" ]; then
-                        echo "gc: removing builder '$n' (endpoint gone: $ep)"
-                        DB buildx rm --force "$n" >/dev/null 2>&1
-                      fi
-                    done
-
-                    # 3. surplus builders above the active job count, oldest last-activity first
-                    while :; do
-                      names=$(builder_names)
-                      count=$(printf '%s\n' $names | grep -c . || true)
-                      [ "${count:-0}" -le "${jobs:-0}" ] && break
-                      oldest=$(for n in $names; do [ -f "$BX/activity/$n" ] && stat -c '%Y %n' "$BX/activity/$n"; done | sort -n | head -1 | cut -d' ' -f2-)
-                      [ -z "$oldest" ] && break
-                      echo "gc: removing surplus builder '$(basename "$oldest")' (builders=$count jobs=$jobs)"
-                      DB buildx rm --force "$(basename "$oldest")" >/dev/null 2>&1 || break
-                    done
-
-                    # 4. always: age-filtered prune (2h) - cannot touch an in-flight lane
-                    D container prune -f --filter until=2h >/dev/null 2>&1
-                    D image prune -af --filter until=2h >/dev/null 2>&1
-                    D volume prune -af --filter until=2h >/dev/null 2>&1
-                    D builder prune -af --filter until=2h >/dev/null 2>&1
-
-                    # 5. idle or under disk pressure: collect everything the finished lanes left
-                    if [ "${jobs:-0}" -eq 0 ] || [ "${use:-0}" -gt "${PRESSURE_PCT:-80}" ]; then
-                      if [ "${jobs:-0}" -eq 0 ]; then
-                        # age grace: a job that started between the job-count probe above and this purge
-                        # would otherwise lose its containers, so nothing younger than 20 minutes is touched
-                        case "$MIN_AGE" in 0|0m|0s) ids=$(D ps -aq);; *) ids=$(D ps -aq --filter "until=$MIN_AGE");; esac
-                      else
-                        case "$PRESSURE_AGE" in 0|0m|0s) ids=$(D ps -aq);; *) ids=$(D ps -aq --filter "until=$PRESSURE_AGE");; esac
-                      fi
-                      [ -n "$ids" ] && D rm -f $ids >/dev/null 2>&1
-                      rm -f "$BX/current" 2>/dev/null
-                      D volume prune -af >/dev/null 2>&1
-                      D image prune -af >/dev/null 2>&1
-                      D builder prune -af >/dev/null 2>&1
-                      echo "gc: collected (jobs=$jobs use=${use}%) -> $(df -h / | tail -1 | awk '{print $4}') free"
-                    fi
-                - path: /etc/systemd/system/charly-docker-store-gc.service
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Unit]
-                    Description=Collect leaked CI docker builders/volumes and repair stale CLI state
-                    [Service]
-                    Type=oneshot
-                    ExecStart=/usr/local/sbin/charly-docker-store-gc
-                - path: /etc/systemd/system/charly-docker-store-gc.timer
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Unit]
-                    Description=Run the CI docker store GC every 10 minutes
-                    [Timer]
-                    OnBootSec=5min
-                    OnUnitActiveSec=10min
-                    [Install]
-                    WantedBy=timers.target
-                - path: /etc/sysctl.d/99-charly-ci-userns.conf
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor
-                    # by default, which breaks CI lanes that sandbox themselves with
-                    # bubblewrap (measured: Image Runtime Startup, 2026-10-10 —
-                    # `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`)
-                    # and every rootless-container path inside a job (uid_map write
-                    # denied). The hosted images the workflows were written for allow
-                    # them.
-                    kernel.apparmor_restrict_unprivileged_userns = 0
-                    kernel.unprivileged_userns_clone = 1
-                - path: /etc/systemd/journald.conf.d/charly-ci.conf
-                  owner: root:root
-                  perms: "0644"
-                  content: |
-                    [Journal]
-                    SystemMaxUse=200M
-            runcmd:
-                - systemctl enable --now qemu-guest-agent
-                - install -m 0755 -d /etc/apt/keyrings
-                - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-                - chmod a+r /etc/apt/keyrings/docker.asc
-                - printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable\n' > /etc/apt/sources.list.d/docker.list
-                - apt-get update -qq
-                # Docker version the CI expects: setup-test-docker pins v29.4.0 and asserts
-                # `docker version --format '{{.Server.Version}}' = 29.4.0`. Installed exact and
-                # held so no lane can silently drift the system daemon.
-                - DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --allow-downgrades docker-ce=5:29.4.0-1~ubuntu.24.04~noble docker-ce-cli=5:29.4.0-1~ubuntu.24.04~noble containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
-                - apt-mark hold docker-ce docker-ce-cli
-                - usermod -aG docker ubuntu
-                # --- co-tenant-safe daemon: stock units inactive, ours active ---
-                - systemctl disable --now docker.service docker.socket || true
-                - systemctl daemon-reload
-                - systemctl enable --now docker-ci.service || true
-                - ln -sfn /run/docker-ci.sock /var/run/docker.sock
-                - systemctl enable --now charly-docker-sock-heal.timer || true
-                - sysctl -p /etc/sysctl.d/99-charly-ci-userns.conf
-                # Store GC: collect leaked buildkit builders/volumes (each
-                # setup-buildx-action starts a builder with its own cache volume) and
-                # repair the stale docker context/buildx selection a lane leaves behind.
-                - systemctl daemon-reload
-                - systemctl enable --now charly-docker-store-gc.timer || true
-                - systemctl restart systemd-journald || true
-                - docker version
-                # --- self-hosted runner tree + the EXACT label set (this config is the source of truth) ---
-                # The runner tree is installed here; REGISTRATION is a separate,
-                # token-guarded operator step because a registration token lives 1h
-                # (same doctrine as pod-github-runner's `post_enable` hook):
-                #   TOKEN=$(gh api -X POST /orgs/opencharly/actions/runners/registration-token --jq .token)
-                #   LABELS=$(cat /etc/charly-runner-labels)
-                #   for i in 1 2 3 4; do D=/home/ubuntu/actions-runner/$i; mkdir -p $D;
-                #     cp -a /home/ubuntu/actions-runner-base/. $D/;
-                #     (cd $D && ./config.sh --unattended --url https://github.com/opencharly --token $TOKEN \
-                #        --name charly-githubrunner-ubuntu-$i --labels "$LABELS" --replace --work _work \
-                #        && sudo ./svc.sh install ubuntu && sudo ./svc.sh start); done
-                # NOTE: cloud-init runcmd runs as ROOT, so every path here is absolute
-                # (/home/ubuntu, never $HOME — the earlier $HOME form wrote the runner
-                # tree into /root and every registration failed).
-                - curl -fsSL -o /tmp/runner.tgz https://github.com/actions/runner/releases/download/v2.337.0/actions-runner-linux-x64-2.337.0.tar.gz
-                - install -d -o ubuntu -g ubuntu -m 0755 /home/ubuntu/actions-runner-base
-                - tar xzf /tmp/runner.tgz -C /home/ubuntu/actions-runner-base && chown -R ubuntu:ubuntu /home/ubuntu/actions-runner-base
-                - printf '%s\n' 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vcpu-ubuntu-2404,blacksmith-32vcpu-ubuntu-2404' > /etc/charly-runner-labels
-                - printf '%s\n' 'opencharly' > /etc/charly-runner-labels-org   # runners 3-4
-                # OOM insurance for 4 concurrent CI lanes: the cloud kernel ships NO zram
-                # module (systemd-zram-setup@zram0 fails on dev-zram0.device), so swap is
-                # a file. Measured with 4 lanes: no swap use, but peaks reach ~12 GiB of
-                # the old 15 GiB VM — the 32 GiB resize removes the pressure.
-                - if ! swapon --show=NAME | grep -q '^/swapfile$'; then fallocate -l 8G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none; chmod 600 /swapfile; mkswap /swapfile >/dev/null; swapon /swapfile; fi
-                - grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-
-
 # Disposable R10 bed for the CI-runner VM entity above. `disposable: true` is the sole
 # authorization for the unattended destroy+rebuild `charly check run` drives. Every step
 # is anchored on the MECHANISM it proves, never on a proxy for it: the pinned Docker
@@ -429,9 +152,329 @@ githubrunner-ubuntu:
 # the token-guarded registration consumes. REGISTRATION itself is NOT here — a
 # registration token lives one hour and is never committed (same doctrine as
 # pod-github-runner's `post_enable` hook).
+# The KubeVirt substrate leg of the same VM. It composes the SAME candy the libvirt entity
+# and its bed do, so the recipe has one home and this is only the substrate: a cloud image
+# imported into the cluster rather than a libvirt domain on this host (decision D1, issue 37).
+githubrunner-ubuntu-vmi:
+    kubevirt:
+        cluster: quant-dev
+        namespace: default
+        # The guest identity. A data_volume is a bare disk with no OCI metadata to read, so
+        # unlike a containerDisk it MUST declare distro + ssh_user here (spec/schema/kubevirt.cue).
+        distro: ubuntu
+        ssh_user: ubuntu
+        # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
+        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
+        # why data_volume+http cannot be used on this cluster).
+        source:
+            kind: container_disk
+            # A DURABLE, PUBLIC ref. It replaces `ttl.sh/…:6h`, which expires by design and
+            # made this leg impossible to reproduce from the committed tree (the previous
+            # build is gone within hours). Rebuild and republish with:
+            #   charly vm build githubrunner-ubuntu-disk --container-disk \
+            #     --push ghcr.io/opencharly/githubrunner-ubuntu-disk:<CalVer>
+            image: ghcr.io/opencharly/githubrunner-ubuntu-disk:2026.295.0418
+            pull_policy: Always
+            disk_path_in_image: /disk/disk.img
+        run_strategy: Always
+        memory: 32G
+        cpu:
+            cores: 16
+        machine: q35
+        # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
+        # bios default would boot nothing.
+        firmware:
+            bootloader: efi
+        cloud_init:
+            timezone: UTC
+            package:
+                - qemu-guest-agent
+            # charly reaches into the booted guest over the substrate's managed port-forward and
+            # walks the candy's plan there; the recipe is never re-authored into cloud-init.
+            charly_install:
+                strategy: auto
+        description: >-
+            The CI-runner Ubuntu VM on a KubeVirt substrate. This TEMPLATE authors only the boot
+            medium and the domain shape; the recipe is applied by its deploy,
+            check-githubrunner-ubuntu-vmi, which composes candy/github-runner-ubuntu through
+            add_candy. It cannot be composed here: a venue-bearing kubevirt node is classified as
+            a template by the loader, and templates reject add_candy.
+
+
+
+githubrunner-ubuntu-vmi-4vcpu:
+    kubevirt:
+        cluster: quant-dev
+        # 4 vCPU / 16 GB — the LIGHT tier at Blacksmith's x64 Ubuntu ratio of 4 GB per vCPU.
+        # ONE runner per VM, and it registers with BOTH `blacksmith-2vcpu-ubuntu-2404` and
+        # `blacksmith-4vcpu-ubuntu-2404`: a deliberate claim that a 4 vCPU / 16 GB host
+        # satisfies both instance types, so the 2-vCPU label no longer needs a smaller size.
+        # The 2-vCPU tag is an UPGRADE claim (4 >= 2): the host gives a 2-vCPU request more
+        # than it asks for. That is NOT the same kind of claim as the 16-vCPU tier's
+        # 32-vCPU routing label, which is an under-provision (see that tier).
+        # A kubevirt deploy may NOT override cpu/memory on a `from:` template (closed disjunction,
+        # measured as `from: field not allowed`), so each SIZE must be a template. The three
+        # tiers exist because one size serves neither repo: openclaw-enterprise routes its
+        # 4/8/16-vcpu lanes to those blacksmith labels BY NAME, so a runner must genuinely be
+        # that size. The pool is 19 slots (9x4, 4x8, 1x16), 4 GB per vCPU on every tier.
+        namespace: default
+        # The guest identity. A data_volume is a bare disk with no OCI metadata to read, so
+        # unlike a containerDisk it MUST declare distro + ssh_user here (spec/schema/kubevirt.cue).
+        distro: ubuntu
+        ssh_user: ubuntu
+        # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
+        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
+        # why data_volume+http cannot be used on this cluster).
+        source:
+            kind: container_disk
+            # A DURABLE, PUBLIC ref. It replaces `ttl.sh/…:6h`, which expires by design and
+            # made this leg impossible to reproduce from the committed tree (the previous
+            # build is gone within hours). Rebuild and republish with:
+            #   charly vm build githubrunner-ubuntu-disk --container-disk \
+            #     --push ghcr.io/opencharly/githubrunner-ubuntu-disk:<CalVer>
+            image: ghcr.io/opencharly/githubrunner-ubuntu-disk:2026.295.0418
+            pull_policy: Always
+            disk_path_in_image: /disk/disk.img
+        run_strategy: Always
+        memory: 16G
+        cpu:
+            cores: 4
+            # host-passthrough exposes the host CPU definition, including its
+            # virtualisation features (svm on AMD, vmx on Intel); the guest measured
+            # under the default host-model carried neither.
+            model: host-passthrough
+        machine: q35
+        # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
+        # bios default would boot nothing.
+        firmware:
+            bootloader: efi
+        cloud_init:
+            timezone: UTC
+            package:
+                - qemu-guest-agent
+            # charly reaches into the booted guest over the substrate's managed port-forward and
+            # walks the candy's plan there; the recipe is never re-authored into cloud-init.
+            charly_install:
+                strategy: auto
+        description: >-
+            4 vCPU / 16 GB — the LIGHT tier at 4 GB per vCPU. One runner per VM, carrying BOTH
+            the blacksmith-2vcpu and blacksmith-4vcpu labels because the host satisfies both.
+
+githubrunner-ubuntu-vmi-8vcpu:
+    kubevirt:
+        cluster: quant-dev
+        # 8 vCPU / 32 GB — the MAIN tier at Blacksmith's 4 GB per vCPU: crabbox's Go test and
+        # coverage shards, two runners per VM at four vCPU / 16 GB each, with enough RAM that a
+        # Go build's peak does not swap.
+        # A kubevirt deploy may NOT override cpu/memory on a `from:` template (closed disjunction,
+        # measured as `from: field not allowed`), so each SIZE must be a template. The three
+        # tiers exist because one size serves neither repo: openclaw-enterprise routes its
+        # 4/8/16-vcpu lanes to those blacksmith labels BY NAME, so a runner must genuinely be
+        # that size. The pool is 19 slots (9x4, 4x8, 1x16), 4 GB per vCPU on every tier.
+        namespace: default
+        # The guest identity. A data_volume is a bare disk with no OCI metadata to read, so
+        # unlike a containerDisk it MUST declare distro + ssh_user here (spec/schema/kubevirt.cue).
+        distro: ubuntu
+        ssh_user: ubuntu
+        # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
+        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
+        # why data_volume+http cannot be used on this cluster).
+        source:
+            kind: container_disk
+            # A DURABLE, PUBLIC ref. It replaces `ttl.sh/…:6h`, which expires by design and
+            # made this leg impossible to reproduce from the committed tree (the previous
+            # build is gone within hours). Rebuild and republish with:
+            #   charly vm build githubrunner-ubuntu-disk --container-disk \
+            #     --push ghcr.io/opencharly/githubrunner-ubuntu-disk:<CalVer>
+            image: ghcr.io/opencharly/githubrunner-ubuntu-disk:2026.295.0418
+            pull_policy: Always
+            disk_path_in_image: /disk/disk.img
+        run_strategy: Always
+        memory: 32G
+        cpu:
+            cores: 8
+            # host-passthrough exposes the host CPU definition, including its
+            # virtualisation features (svm on AMD, vmx on Intel); the guest measured
+            # under the default host-model carried neither.
+            model: host-passthrough
+        machine: q35
+        # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
+        # bios default would boot nothing.
+        firmware:
+            bootloader: efi
+        cloud_init:
+            timezone: UTC
+            package:
+                - qemu-guest-agent
+            # charly reaches into the booted guest over the substrate's managed port-forward and
+            # walks the candy's plan there; the recipe is never re-authored into cloud-init.
+            charly_install:
+                strategy: auto
+        description: >-
+            8 vCPU / 32 GB — the MAIN tier at 4 GB per vCPU for crabbox's Go test/coverage shards:
+            two runners per VM at four vCPU / 16 GB each.
+
+githubrunner-ubuntu-vmi-16vcpu:
+    kubevirt:
+        cluster: quant-dev
+        # 16 vCPU / 64 GB — the HEAVY tier at Blacksmith's 4 GB per vCPU: Go modules and the
+        # coverage matrix at eight vCPU / 32 GB per runner, and enterprise's 16-vcpu lanes.
+        #
+        # LABEL NOTE (recorded, not inferred). This VM's two runners ALSO carry
+        # `blacksmith-32vcpu-ubuntu-2404`. That is an UNDER-provision: Blacksmith's 32-vCPU
+        # type is 32 vCPU / 128 GB, so a 32-vCPU-labelled job routed here gets half the cores
+        # and half the RAM. The label is a routing decision the operator made, not a
+        # measurement. If a 32-vCPU-labelled job starts failing on OOM or timing on this
+        # host, the fix is to size the VM to 32/128 — which currently does not fit: the
+        # approved shape is 336 GB (9x16 + 4x32 + 1x64), and resizing this VM from 64 to
+        # 128 adds 64 GiB, bringing the fleet to 400 GiB — past the 392 GiB cluster.
+        #
+        # (Contrast the 4-vCPU tier's `blacksmith-2vcpu` tag: 4 >= 2 is an upgrade.)
+        #
+        # A kubevirt deploy may NOT override cpu/memory on a `from:` template (closed disjunction,
+        # measured as `from: field not allowed`), so each SIZE must be a template. The three
+        # tiers exist because one size serves neither repo: openclaw-enterprise routes its
+        # 4/8/16-vcpu lanes to those blacksmith labels BY NAME, so a runner must genuinely be
+        # that size. The pool is 19 slots (9x4, 4x8, 1x16), 4 GB per vCPU on every tier.
+        namespace: default
+        # The guest identity. A data_volume is a bare disk with no OCI metadata to read, so
+        # unlike a containerDisk it MUST declare distro + ssh_user here (spec/schema/kubevirt.cue).
+        distro: ubuntu
+        ssh_user: ubuntu
+        # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
+        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
+        # why data_volume+http cannot be used on this cluster).
+        source:
+            kind: container_disk
+            # A DURABLE, PUBLIC ref. It replaces `ttl.sh/…:6h`, which expires by design and
+            # made this leg impossible to reproduce from the committed tree (the previous
+            # build is gone within hours). Rebuild and republish with:
+            #   charly vm build githubrunner-ubuntu-disk --container-disk \
+            #     --push ghcr.io/opencharly/githubrunner-ubuntu-disk:<CalVer>
+            image: ghcr.io/opencharly/githubrunner-ubuntu-disk:2026.295.0418
+            pull_policy: Always
+            disk_path_in_image: /disk/disk.img
+        run_strategy: Always
+        memory: 64G
+        cpu:
+            cores: 16
+            # host-passthrough exposes the host CPU definition, including its
+            # virtualisation features (svm on AMD, vmx on Intel); the guest measured
+            # under the default host-model carried neither.
+            model: host-passthrough
+        machine: q35
+        # An Ubuntu cloud image is UEFI/GPT — its bootloader lives on the ESP, and KubeVirt's
+        # bios default would boot nothing.
+        firmware:
+            bootloader: efi
+        cloud_init:
+            timezone: UTC
+            package:
+                - qemu-guest-agent
+            # charly reaches into the booted guest over the substrate's managed port-forward and
+            # walks the candy's plan there; the recipe is never re-authored into cloud-init.
+            charly_install:
+                strategy: auto
+        description: >-
+            16 vCPU / 64 GB — the HEAVY tier at 4 GB per vCPU: Go modules and the coverage matrix
+            at eight vCPU / 32 GB per runner. Its runners carry BOTH the 16-vcpu and the
+            32-vcpu blacksmith labels; the 32-vcpu tag is an operator routing decision and an
+            UNDER-provision (see the tier comment).
+
+# The KubeVirt bed. Unlike the libvirt bed this does NOT restate the recipe: it composes the
+# SAME candy onto the SAME entity through add_candy, which is what makes one recipe serve both
+# substrates. disposable: true is the authorization for the destroy/rebuild path it exercises.
+# The disk-builder's OWN bed. The vm: substrate BUILDS the box it boots, so a defect in
+# githubrunner-ubuntu-disk fails HERE -- which is the coverage the KubeVirt bed cannot give it,
+# because a kubevirt deploy can only reference a same-kind template and boots an image by reference.
+check-githubrunner-ubuntu-disk:
+    vm:
+        from: githubrunner-ubuntu-disk
+        disposable: true
+        lifecycle: dev
+        plan:
+            - check: command=test -f /etc/os-release && grep -q 'VERSION_CODENAME=noble' /etc/os-release && echo DISK-BUILD-OK
+              id: disk-built-and-bootable
+              description: |
+                Proves the disk builder actually produced a bootable noble rootfs: this guest was booted
+                from the built disk, so the assertion cannot pass if the build is broken.
+              stdout:
+                - contains: DISK-BUILD-OK
+              exit_status: 0
+              context: ['runtime']
+              command: |
+                set -euo pipefail
+                test -f /etc/os-release
+                grep -q 'VERSION_CODENAME=noble' /etc/os-release
+                echo DISK-BUILD-OK
+        description: |
+            R10 proof of githubrunner-ubuntu-disk. Fails without that entity, and therefore gives the
+            boot-disk builder the coverage the KubeVirt bed structurally cannot.
+check-githubrunner-ubuntu-vmi:
+    kubevirt:
+        from: githubrunner-ubuntu-vmi
+        add_candy:
+            - github-runner-ubuntu
+        disposable: true
+        lifecycle: dev
+        plan:
+            - check: command=test -x /home/ubuntu/actions-runner-base/bin/Runner.Listener && test -S /run/docker-ci.sock && echo KUBEVIRT-CANDY-OK
+              id: candy-converged-on-kubevirt
+              description: |
+                The SAME candy that the libvirt bed proves here converges on a DIFFERENT
+                substrate. Asserts the two artifacts that only exist when the recipe actually
+                ran in this guest: the Actions runner agent binary, and the co-tenant
+                docker-ci.service socket. A bare textual check asserts nothing and charly would
+                try to execute the text as a command, so this carries a real command and the
+                `runtime` context that makes it a live probe rather than a mutating deploy step.
+              stdout:
+                - contains: KUBEVIRT-CANDY-OK
+              exit_status: 0
+              context: ['runtime']
+              command: |
+                set -euo pipefail
+                test -x /home/ubuntu/actions-runner-base/bin/Runner.Listener
+                test -S /run/docker-ci.sock
+                echo KUBEVIRT-CANDY-OK
+            # A PREBUILT-DISK deploy gets only the candy's deploy-context steps, so the
+            # build-scope `distro.ubuntu.package:` list never lands here. This is the check
+            # that can catch a deploy-scope gap (the Chromium set was in the wrong scope
+            # until this bed asserted it).
+            - check: the deploy-scope job toolchain is present in the prebuilt-disk guest
+              id: deploy-scope-toolchain
+              description: |
+                Asserts the deploy-time install, not the build-scope package list: a tool
+                that is only in `distro.ubuntu.package:` is absent here.
+              stdout:
+                - contains: DEPLOY-SCOPE-TOOLCHAIN-OK
+              exit_status: 0
+              context: ['runtime']
+              command: |
+                set -euo pipefail
+                for tool in node gh ruby skopeo pip3 unzip zip tree; do
+                  command -v "$tool" >/dev/null || { echo "missing deploy-scope tool: $tool" >&2; exit 1; }
+                done
+                dpkg-query -W -f='${Status}' libnss3 | grep -q 'install ok installed' \
+                  || { echo "missing Chromium runtime package: libnss3" >&2; exit 1; }
+                echo DEPLOY-SCOPE-TOOLCHAIN-OK
+        description: |
+            R10 proof of the KubeVirt form of the CI-runner recipe, on the configured quant-dev
+            cluster. The candy is composed by THIS deploy over the substrate's managed
+            port-forward, so a green run proves the recipe is substrate-independent rather than
+            libvirt-specific, and that the data_volume/EFI/q35 boot path carries it.
+
 check-githubrunner-ubuntu-vm:
     vm:
         from: githubrunner-ubuntu
+        # The recipe is applied by THIS candy through the deploy's InstallPlan — in the
+        # guest, over the substrate's SSH — so the bed keeps its "wait for first boot,
+        # then assert" shape and the recipe stops being cloud-init that a bed has to race.
+        add_candy:
+            - github-runner-ubuntu
         disposable: true
         lifecycle: dev
         description: |
@@ -516,10 +559,11 @@ check-githubrunner-ubuntu-vm:
               id: socket-and-per-runner-docker-host
               description: |
                 The shared socket path lanes hardcode or mount resolves to the co-tenant-safe
-                daemon, and all four runner instances carry DOCKER_HOST to that daemon's own
-                socket — which is what makes a lane's relink of the shared symlink unable to
-                redirect its co-tenants. Both halves are needed: the symlink alone would be
-                hijackable, the drop-ins alone would break the tests that mount the path.
+                daemon, and the runner tree carries NO DOCKER_HOST override, so a job sees the
+                same default socket a GitHub-hosted runner does and the tests that mount
+                /var/run/docker.sock keep working. The override was removed after measurement:
+                with DOCKER_HOST set, `TestCreateContainerCanMountDockerSocket` stopped
+                mounting the socket and the scope test classified the engine as podman.
               stdout:
                 - contains: SOCKET-AND-DOCKER-HOST-OK
               exit_status: 0
@@ -527,8 +571,8 @@ check-githubrunner-ubuntu-vm:
                 - runtime
               command: |
                 test "$(readlink /var/run/docker.sock)" = /run/docker-ci.sock &&
-                DOCKER_HOST=unix:///run/docker-ci.sock docker version --format '{{.Server.Version}}' >/dev/null &&
-                test "$(grep -l 'DOCKER_HOST=unix:///run/docker-ci.sock' /etc/systemd/system/actions.runner.opencharly.charly-githubrunner-ubuntu-*.service.d/docker-host.conf | wc -l)" = 4 &&
+                docker version --format '{{.Server.Version}}' >/dev/null &&
+                ! grep -q '^DOCKER_HOST=' /home/ubuntu/actions-runner-base/.env 2>/dev/null &&
                 printf 'SOCKET-AND-DOCKER-HOST-OK\n'
             - check: a co-tenant keeps a live daemon through DOCKER_HOST while a lane mutates the shared socket
               id: cotenant-isolation-under-lane-mutation
@@ -617,23 +661,23 @@ check-githubrunner-ubuntu-vm:
                 test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 0 &&
                 printf 'UNPRIVILEGED-USERNS-OK\n'
             - check: the runner tree and both exact label sets are in place for token-guarded registration
-              id: runner-tree-and-labels-ready
+              id: runner-tree-and-registration-ready
               description: |
-                The runner tree the token-guarded registration copies, plus the exact label
-                sets: the three blacksmith-* labels the fork's CI hardcodes in `runs-on:`
-                (no Blacksmith app exists in the org) and the org-only set for the runners
-                kept off the heavy pool. Registration itself is deliberately NOT done here —
-                a registration token lives one hour and is never committed.
+                The runner tree the token-guarded registration copies, and the ONE registration
+                script that copies it. The label set is no longer a file on the guest: it is
+                `RUNNER_LABELS` passed to the script, so there is exactly one source and it
+                cannot drift from the registration command. Registration itself is deliberately
+                NOT done here — a registration token lives one hour and is never committed.
               stdout:
-                - contains: RUNNER-TREE-AND-LABELS-OK
+                - contains: RUNNER-TREE-AND-REGISTRATION-OK
               exit_status: 0
               context:
                 - runtime
               command: |
                 test -x /home/ubuntu/actions-runner-base/config.sh &&
-                test "$(cat /etc/charly-runner-labels)" = 'opencharly,blacksmith-8vcpu-ubuntu-2404,blacksmith-16vcpu-ubuntu-2404,blacksmith-32vcpu-ubuntu-2404' &&
-                test "$(cat /etc/charly-runner-labels-org)" = opencharly &&
-                printf 'RUNNER-TREE-AND-LABELS-OK\n'
+                test -x /usr/local/sbin/charly-register-runners &&
+                /usr/local/sbin/charly-register-runners --help >/dev/null &&
+                printf 'RUNNER-TREE-AND-REGISTRATION-OK\n'
             - check: both hygiene timers are active, the journal is capped, the disk is the 128 GiB one and swap is on
               id: resources-and-timers
               description: |
@@ -912,674 +956,97 @@ githubrunner-ubuntu-skill:
     skill:
         name: githubrunner-ubuntu
         family: distros
-        owner: githubrunner-ubuntu
-        description: |-
-            The CI-runner Ubuntu VM (kind:vm, cloud_image noble) — the fleet substrate that
-            runs the Blacksmith-shaped CI of opencharly/openclaw-enterprise on host `no`,
-            with a rootful Docker daemon pinned to the version the CI asserts, a
-            co-tenant-safe daemon/socket split for several runners on one host, a docker
-            store GC, and the disposable `check-githubrunner-ubuntu-vm` R10 bed.
-            MUST be invoked before editing `githubrunner-ubuntu`, its cloud-init recipe, or
-            its bed — and before troubleshooting a CI job that fails on a runner.
+        # The skill teaches the `githubrunner-ubuntu` VM, whose recipe IS the
+        # `github-runner-ubuntu` candy (extracted from that entity as cloud-init,
+        # opencharly/distro-ubuntu#37). A VM has no source directory, so a candy owns it.
+        owner: github-runner-ubuntu
         triggers:
             - "The CI-runner Ubuntu VM / `githubrunner-ubuntu` / the `check-githubrunner-ubuntu-vm` bed"
             - "A CI lane failing on a self-hosted Ubuntu runner (docker daemon, disk, buildx builder)"
-        content: |
-            # githubrunner-ubuntu
 
-            The `kind: vm` entity behind the Ubuntu half of the org's self-hosted CI
-            fleet. Boots the upstream noble cloud image under libvirt/QEMU (UEFI
-            insecure, q35) and provisions, through cloud-init, a rootful Docker daemon
-            that several concurrent CI runners can share safely.
+# The ClawSweeper review bed. A disposable pod runs the image against a TWO-COMMIT fixture
+# whose second commit introduces a deliberate defect, and asserts that the engine loads and
+# reaches the model boundary. A check bed exports NO secret, so the model leg cannot run here;
+# it is never mocked either (R8) — the live round-trip is the advisory workflow's job, where
+# the org key exists.
+check-clawsweeper-review-pod:
+    pod:
+        image: clawsweeper-review
+        disposable: true
+        lifecycle: dev
+        plan:
+            - check: the entrypoint runs the engine to a report and never dies on its own permissions
+              id: review-verdict
+              description: |
+                A check bed exports NO secret, so `OLLAMA_API_KEY` can never resolve here (the
+                runner resolves only its own auto-exported variables — a key guard in a check
+                step is a DEAD assertion), and the model leg is therefore not exercised in this
+                bed. It is never faked either (R8). What IS proven: the fixture exists, the
+                entrypoint's flag contract holds, `jq` is present, the engine reaches the model
+                boundary, and nothing fails on the image's own permissions.
+              context: [runtime]
+              exit_status: 0
+              command: |
+                  set -euo pipefail
+                  # A check step prepares its own input: a `run:` step is SKIPPED in
+                  # verify-only mode (measured: "skipped — verify-only mode (mutating step)").
+                  rm -rf /tmp/fixture && mkdir -p /tmp/fixture
+                  git init -q -b main /tmp/fixture
+                  git -C /tmp/fixture config user.email fixture@example.invalid
+                  git -C /tmp/fixture config user.name fixture
+                  printf 'def add(a, b):\n    return a + b\n' > /tmp/fixture/calc.py
+                  git -C /tmp/fixture add calc.py
+                  git -C /tmp/fixture commit -qm "base: add() adds"
+                  printf 'def add(a, b):\n    return a - b\n' > /tmp/fixture/calc.py
+                  git -C /tmp/fixture add calc.py
+                  git -C /tmp/fixture commit -qm "defect: add() subtracts"
 
-            > **Lives in `opencharly/distro-ubuntu`.** The CachyOS half of the fleet —
-            > the rootless `box/githubrunner` pods and their `check-githubrunner-pod` bed
-            > — lives in `opencharly/distro-cachyos`.
+                  command -v clawsweeper-review
+                  help="$(clawsweeper-review --help)"
+                  printf '%s\n' "$help" | grep -q -- '--local-range'
+                  printf '%s\n' "$help" | grep -q -- '--result-format json'
+                  jq --version
 
-            ## Why a VM, and why the recipe is shaped this way
+                  base="$(git -C /tmp/fixture rev-parse HEAD~1)"
+                  out="$(CLAWSWEEPER_TARGET_REPO=opencharly/fixture BASE_SHA="$base" TARGET_DIR=/tmp/fixture clawsweeper-review 2>&1 || true)"
+                  printf '%s\n' "$out" | tail -3
 
-            The Blacksmith-shaped CI of `opencharly/openclaw-enterprise` needs a rootful
-            Docker daemon, **privileged k3s node containers** with `br_netfilter` on the
-            node kernel, **systemd** (`sudo systemctl stop docker.service`) and **apt +
-            passwordless sudo**. A rootless pod has none of those, on any image.
+                  # The regression that killed every review: an unwritable CODEX_HOME dies at
+                  # "failed to initialize in-process app-server client: Permission denied"
+                  # before the model is reached.
+                  if printf '%s\n' "$out" | grep -q 'Permission denied'; then
+                    echo "the engine died on the image's own permissions"
+                    exit 1
+                  fi
+                  # It reached the model boundary: a report was produced. NO key-shaped
+                  # assertion — the check must not depend on the key being ABSENT, which is
+                  # the trap the layer's own runtime check was blocked for.
+                  printf '%s\n' "$out" | grep -q '"reports"'
+                  echo REVIEW-ENGINE-REACHED-MODEL-BOUNDARY
+        description: |
+            R10 proof of the review image: the engine converges, accepts an opencharly/* target
+            through the profile overlay, and reaches the model boundary. The live model
+            round-trip needs a key, which a check bed cannot supply — that leg is the advisory
+            workflow's job (opencharly/.github `clawsweeper-review.yml`).
 
-            Those workflows are also written for **one job per machine** — their runners
-            are per-job VMs. This VM packs four runners onto one host, so every unusual
-            piece of the recipe exists to make that co-tenancy safe, and each was measured
-            on the live fleet (2026-10-10):
-
-            | Piece | The failure it prevents |
-            |---|---|
-            | Docker pinned to `29.4.0` (`docker-ce=5:29.4.0-…`) and `apt-mark hold` | `setup-test-docker` asserts `docker version = 29.4.0`; a drifted daemon fails that lane and can fail version-sensitive tests |
-            | The daemon runs as `docker-ci.service` on `/run/docker-ci.sock`, stock `docker.service`/`docker.socket` inactive | a lane's `systemctl stop docker.service docker.socket` killed the co-tenant daemon: measured 14:07:16 stop → 14:07:28 `buildx create` → *Cannot connect to the Docker daemon* |
-            | `/var/run/docker.sock` kept as a symlink to the real socket | lanes, helpers and tests hardcode or mount that path (`runtime-image-fixture.mjs`, `docker-compute-token-retry`, production-compose mounts) |
-            | `DOCKER_HOST=unix:///run/docker-ci.sock` in every runner's `*.service.d/docker-host.conf` | a lane that relinks the shared symlink can otherwise redirect its co-tenants |
-            | `charly-docker-sock-heal.timer` (30 s) | repairs a `/var/run/docker.sock` left dangling by such a lane, without fighting one that legitimately relinked it |
-            | `charly-docker-store-gc.timer` (10 min) | every `setup-buildx-action` leaves a RUNNING buildkit builder container with its own cache volume; cancelled lanes leak them — 13 held 84 GB and filled the disk to 100 %. It also repairs the stale docker context/buildx selection such a lane leaves pointing at its deleted job directory (which breaks every later `docker` CLI call that does not set `DOCKER_HOST`) |
-            | `journald` capped at 200 MB | a log flood cannot fill the disk |
-            | 128 GiB disk, 32 GiB RAM, 16 vCPU, 8 GiB swapfile | four concurrent lanes peaked at ~12 GiB on a 15 GiB VM and produced 44 GiB of docker state on a 61 GiB disk |
-
-            ## Registration is token-guarded (operator step)
-
-            cloud-init installs the runner tree at `/home/ubuntu/actions-runner-base` and
-            the exact label sets (`/etc/charly-runner-labels`,
-            `/etc/charly-runner-labels-org`). **Registration is deliberately not automated**
-            — a registration token lives one hour and is never committed:
-
-            ```bash
-            TOKEN=$(gh api -X POST /orgs/opencharly/actions/runners/registration-token --jq .token)
-            LABELS=$(cat /etc/charly-runner-labels)
-            for i in 1 2 3 4; do D=/home/ubuntu/actions-runner/$i; mkdir -p $D
-              cp -a /home/ubuntu/actions-runner-base/. $D/
-              (cd $D && ./config.sh --unattended --url https://github.com/opencharly \
-                 --token "$TOKEN" --name charly-githubrunner-ubuntu-$i --labels "$LABELS" \
-                 --replace --work _work && sudo ./svc.sh install ubuntu && sudo ./svc.sh start); done
-            ```
-
-            ## R10 gate
-
-            ```bash
-            charly check run check-githubrunner-ubuntu-vm
-            ```
-
-            The bed proves the pinned Docker version, the daemon/socket split, the symlink
-            and per-runner `DOCKER_HOST`, co-tenant isolation under a simulated lane
-            mutation, the store GC collecting a leaked running container plus its volume,
-            the runner tree and label sets, the timers and the sizing. It registers no
-            runner and needs no secret.
-
-ubuntu-builder-skill:
+# ---------------------------------------------------------------------------
+# The verb/schema skills this repo's own candy owns — routing only.
+#
+# Each node carries `name`/`family`/`owner` (plus `triggers:` where the skill
+# generates DISPATCHER.md rows). The prose is the skill FILE at
+# `<repo root>/.agents/skills/<name>/SKILL.md`, never an inline `description:`
+# or `content:` — an inline body that disagrees with its file is a hard error
+# in the marketplace generator. `family:` is the marketplace family the skill
+# was authored under, kept so every existing `/charly-<family>:<name>` address
+# still resolves; `owner:` names the candy whose command/kind surface the
+# skill documents. This candy composes no image, so these nodes add nothing to
+# any `ai.opencharly.skill` OCI label; the bodies reach consumers through the
+# generated marketplace corpus.
+# ---------------------------------------------------------------------------
+ubuntu-debootstrap-vm-skill:
     skill:
-        name: ubuntu-builder
-        family: distros
-        owner: ubuntu-builder
-        description: |-
-            Minimal Ubuntu 24.04 builder image (pixi + Node.js + build-toolchain)
-            used as the multi-stage builder for Ubuntu-based boxes — currently
-            ubuntu-coder. Runs as uid 1000 `ubuntu` (adopted from the upstream
-            ubuntu:24.04 base image via the embedded distro vocabulary's base_user declaration).
-            MUST be invoked before building, deploying, configuring, or troubleshooting
-            the ubuntu-builder box.
+        name: ubuntu-debootstrap-vm
+        family: vm
+        owner: ubuntu-skills
         triggers:
             - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
-        content: |
-            # ubuntu-builder
-            
-            Ubuntu 24.04 (noble) counterpart of `/charly-distros:fedora-builder` and `/charly-distros:debian-builder`. Same role — pixi/npm/cargo multi-stage builder — with one important difference: the builder runs as `ubuntu` (uid 1000) because the upstream `ubuntu:24.04` base image ships a pre-existing `ubuntu:ubuntu` account at uid 1000, and the embedded `distro.ubuntu.base_user` vocabulary adopts it.
-            
-            Lives in the **`opencharly/distro-ubuntu`** repo (git submodule at **`box/ubuntu`**).
-            Build it from the submodule: `charly -C box/ubuntu box build ubuntu-builder`
-            (normally builds implicitly as a dependency of `ubuntu-coder`). Its
-            `pixi`/`nodejs`/`build-toolchain` candies are pulled by github reference from the
-            main repo.
-            
-            ## Box Properties
-            
-            | Property | Value |
-            |----------|-------|
-            | Base | `ubuntu` (which = `ubuntu:24.04` + our bootstrap) |
-            | Layers | `pixi`, `nodejs`, `build-toolchain` |
-            | Platforms | `linux/amd64` |
-            | Registry | `ghcr.io/opencharly` |
-            | User | `ubuntu` / uid 1000 (**adopt mode** — see `/charly-image:image` "user_policy") |
-            | Home | `/home/ubuntu` |
-            
-            ## Full candy stack
-            
-            1. `/charly-distros:ubuntu` — Ubuntu 24.04 + bootstrap. Inherits Debian's `apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg` pattern because the embedded `distro.ubuntu` vocabulary declares `inherits: debian`. Ubuntu-specific: `base_user: { name: ubuntu, uid: 1000, gid: 1000, home: /home/ubuntu }` — no `useradd` step emitted.
-            2. `/charly-languages:pixi` — pixi package manager + env paths (`/home/ubuntu/.pixi`).
-            3. `/charly-coder:nodejs` — Node.js + npm (generic `nodejs`).
-            4. `/charly-coder:build-toolchain` — same Debian `-dev` packages as `/charly-distros:debian-builder`.
-            
-            ## Adopt-mode semantics
-            
-            When the generator emits the Containerfile for this image, the bootstrap section contains:
-            
-            ```
-            # User ubuntu (uid=1000) adopted from base image (declared in the embedded distro.base_user vocabulary) — no useradd needed
-            WORKDIR /home/ubuntu
-            USER 1000
-            ```
-            
-            No `useradd`, no `groupadd`, no `usermod -l` rename. The upstream `ubuntu:ubuntu` account is honored verbatim — HOME, npm prefix, pixi env, cargo home, sudoers all derive from `resolved.User = "ubuntu"`. See `/charly-image:image` "user_policy" and `/charly-internals:generate-source` "writeBootstrap".
-            
-            ## Role in the build system
-            
-            Declares `builds: [pixi, npm, cargo]` and is referenced from `ubuntu:` as:
-            
-            ```yaml
-            ubuntu:
-              builder:
-                pixi: ubuntu-builder
-                npm: ubuntu-builder
-                cargo: ubuntu-builder
-            ```
-            
-            During `charly box build ubuntu-coder`, cargo/npm/pixi-owning candies get their `FROM ubuntu-builder AS <layer>-<type>-build` stages from this image, then `COPY --from=<stage> --chown=1000:1000 /home/ubuntu /home/ubuntu` into the final ubuntu-coder. (The `--chown=1000:1000` numeric form works uniformly regardless of user name — see `/charly-coder:build-toolchain` for the builder-artifact COPY pattern.)
-            
-            ## Cross-distro sibling builders
-            
-            - `/charly-distros:fedora-builder` — RPM-family, `user:user` uid 1000 (create).
-            - `/charly-distros:debian-builder` — deb-family, Debian 13, `user:user` (create — Debian 13 ships no pre-existing uid-1000 user).
-            - `/charly-distros:arch-builder` — pacman-family, `user:user` + `yay` for AUR.
-            
-            The three builders have near-identical candy stacks (pixi + nodejs + build-toolchain). The only meaningful divergence is this box's adopt-mode `ubuntu:ubuntu` identity.
-            
-            ## Quick start
-            
-            ```bash
-            charly -C box/ubuntu box build ubuntu-builder
-            charly shell ubuntu-builder               # drops you into /home/ubuntu as uid 1000
-            id                                    # uid=1000(ubuntu) gid=1000(ubuntu)
-            ```
-            
-            Typically not invoked directly — it's a build-time dependency of `/charly-coder:ubuntu-coder`.
-            
-            ## Verification
-            
-            - `charly -C box/ubuntu box list | grep ubuntu-builder`
-            - `charly shell ubuntu-builder -- id` → `uid=1000(ubuntu) gid=1000(ubuntu)`
-            - `charly shell ubuntu-builder -- pixi --version && node --version && gcc --version`
-            
-            ## Related boxes
-            
-            - `/charly-distros:ubuntu` — parent base; declares `base_user:` in the embedded distro vocabulary.
-            - `/charly-coder:ubuntu-coder` — the consumer that this builder serves.
-            - `/charly-distros:debian-builder` — deb-family sibling without adopt mode.
-            - `/charly-distros:fedora-builder` — canonical RPM-family sibling.
-            
-            ## Related candies
-            
-            - `/charly-languages:pixi`, `/charly-coder:nodejs`, `/charly-coder:build-toolchain`
-            
-            ## Related commands
-            
-            - `/charly-build:build` — `base_user:` declaration format in the embedded `distro.*` vocabulary
-            - `/charly-image:image` — `user_policy:` field (auto / adopt / create) and the decision table
-            - `/charly-build:generate` — adopt-vs-create writeBootstrap emission modes
-            
-            ## When to use this skill
-            
-            **MUST be invoked** when:
-            
-            - Building or troubleshooting `ubuntu-builder` itself.
-            - Debugging multi-stage COPY-from errors or permission issues in a `ubuntu-coder` build (this is the source stage; uid 1000 = `ubuntu` by adoption).
-            - Understanding why `${HOME}` = `/home/ubuntu` (not `/home/user`) inside builder stages.
-
-ubuntu-coder-skill:
-    skill:
-        name: ubuntu-coder
-        family: coder
-        owner: ubuntu-coder
-        description: |-
-            Kitchen-sink development box on Ubuntu 24.04 noble: coding + AI-coding
-            CLIs + DevOps tooling in one container. Ubuntu base, 30+ direct candies
-            mirroring fedora-coder's stack. Runs as uid 1000 `ubuntu` — the upstream
-            ubuntu:24.04 account, adopted verbatim via the embedded build
-            vocabulary's base_user declaration. 142/0/1-skip tests pass.
-            Use when working with the ubuntu-coder box — especially when the
-            `${USER}` / `${HOME}` / sudoers differ from the other three coder boxes.
-        triggers:
-            - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
-        content: |-
-            # ubuntu-coder
-            
-            Ubuntu 24.04 noble counterpart of `/charly-coder:fedora-coder`. Same 80-line test block, same large candy list, same rootless posture — but **the resolved user is `ubuntu` (not `user`)** because the upstream `ubuntu:24.04` base image ships a pre-existing `ubuntu:ubuntu` account at uid 1000, and the embedded `distro.ubuntu` vocabulary declares `base_user:` to adopt it. Everything that touches the user account — `${HOME}`, npm prefix, pixi env, sudoers — derives from `resolved.User = "ubuntu"`.
-            
-            > **Location:** lives in the **`opencharly/distro-ubuntu`** repo (git submodule at
-            > **`box/ubuntu`**) — a SEPARATE repo from `opencharly/distro-debian`. Its
-            > candies are pulled by github reference from the main repo. Build/validate from
-            > the submodule: `charly -C box/ubuntu box build ubuntu-coder`, or
-            > `charly --repo opencharly/distro-ubuntu box build ubuntu-coder`. Deploy-mode verbs
-            > read the built image's OCI labels and work from anywhere once it's local.
-            
-            ## Definition
-            
-            ```yaml
-            ubuntu-coder:
-              base: ubuntu
-              ports:
-                - "2222:2222"                 # sshd-wrapper
-                - "18765:18765"               # charly-mcp (Streamable HTTP)
-              candy:
-                # Same stack as debian-coder — see that skill for the full list
-                - agent-forwarding
-                - sshd
-                - charly
-                - charly-mcp
-                - container-nesting
-                - '@github.com/opencharly/pod-dbus'
-                - '@github.com/opencharly/layer-tmux'
-                - language-runtimes
-                - '@github.com/opencharly/layer-golang'
-                - '@github.com/opencharly/layer-nodejs'
-                - rust
-                - pixi
-                - uv
-                - build-toolchain
-                - dev-tools
-                - pre-commit
-                - direnv
-                - gh
-                - typst
-                - asciinema
-                - claude-code
-                - codex
-                - '@github.com/opencharly/layer-gemini'
-                - forgecode
-                - oracle
-                - devops-tools
-                - '@github.com/opencharly/layer-kubernetes'
-                - docker-ce
-                - github-actions
-                - google-cloud
-                - google-cloud-npm
-                - grafana-tools
-            ```
-            
-            ## User model — adopt mode
-            
-            The embedded build vocabulary (`charly/charly.yml`) declares `distro.ubuntu.base_user`:
-            
-            ```yaml
-            base_user:
-              name: ubuntu
-              uid: 1000
-              gid: 1000
-              home: /home/ubuntu
-            ```
-            
-            `ubuntu-coder` doesn't set an explicit `user:` field, so `user_policy: auto` (the default) adopts the base_user. The generator emits no `useradd` — the bootstrap section is a one-line comment:
-            
-            ```
-            # User ubuntu (uid=1000) adopted from base image (declared in the embedded distro.base_user) — no useradd needed
-            WORKDIR /home/ubuntu
-            USER 1000
-            ```
-            
-            Resolved identity: `User=ubuntu, UID=1000, GID=1000, Home=/home/ubuntu`. The image's OCI labels carry these values (`ai.opencharly.user="ubuntu"`, `ai.opencharly.home="/home/ubuntu"`) so deploy-mode quadlets and `charly shell` find them without re-reading `charly.yml`.
-            
-            **Why adopt over rename?** Ubuntu's cloud-init tooling, documentation, and `/etc/passwd` metadata all expect the user to be named `ubuntu`. Renaming fights the upstream contract. Adopting honors it. See `/charly-image:image` "user_policy" for the full rationale and the 3-value policy table.
-            
-            ## Live verification
-            
-            ```
-            $ charly shell ubuntu-coder -c 'id; /usr/bin/dotnet --version; sudo -l'
-            uid=1000(ubuntu) gid=1000(ubuntu) groups=1000(ubuntu),4(adm),20(dialout),24(cdrom),25(floppy),27(sudo),29(audio),30(dip),44(video),46(plugdev),105(libvirt)
-            9.0.313
-            User ubuntu may run the following commands on <host>:
-                (ALL : ALL) ALL
-            ```
-            
-            ## Security posture
-            
-            Identical to `/charly-coder:debian-coder` — the only diff is `User` field.
-            
-            | Field | Value | Source |
-            |---|---|---|
-            | `cap_add` | **(empty)** | — |
-            | `security_opt` | `[unmask=/proc/*]` | `/charly-distros:container-nesting` |
-            | `devices` | `[/dev/fuse, /dev/net/tun]` | `/charly-distros:container-nesting` |
-            | `privileged` | `false` | — |
-            | Network | bridge | defaults |
-            | UID / user | `1000 / ubuntu` | **adopt mode** |
-            | sudo | passwordless via `/etc/sudoers.d/charly-user` (discovered via `getent passwd 1000` → `ubuntu`) | `/charly-coder:sshd` |
-            
-            ## Ubuntu-specific layer quirks (differences vs debian-coder)
-            
-            - **fastfetch test is skipped** via `exclude_distros: [ubuntu:24.04]` (`/charly-coder:dev-tools`). Ubuntu 24.04 noble main does not ship `fastfetch` (Debian 13 trixie does, and so do Fedora/Arch). Skipping is cleaner than failing — see `/charly-check:check` for the `exclude_distros:` field of the declarative-test schema.
-            - **dotnet-sdk-9.0 source**: uses Microsoft's `dotnet-install.sh` (same as debian-coder). Note: Canonical's noble main/universe ships `dotnet-sdk-8.0` and `dotnet-sdk-10.0` but NOT 9.0; Microsoft's noble apt repo ships 10.0 only. `dotnet-install.sh --channel 9.0` is the only cross-distro-consistent path to .NET 9. See `/charly-coder:language-runtimes`.
-            - **Everything else** is identical to debian-coder. The sudoers `getent` discovery, bat→batcat symlink, virtualization package-existence tests — all are implemented once in the respective candies and work uniformly on both debian-coder and ubuntu-coder.
-            
-            ## Test results
-            
-            `charly check box ghcr.io/opencharly/ubuntu-coder:latest` — **142 passed · 0 failed · 1 skipped** (fastfetch, by design).
-            
-            ## Verification recipe
-            
-            ```bash
-            # 1. Validate
-            charly -C box/ubuntu box validate
-            
-            # 2. Build (auto-chains: ubuntu → ubuntu-builder → ubuntu-coder)
-            charly -C box/ubuntu box build ubuntu-coder
-            
-            # 3. Disposable-container tests
-            charly check box ghcr.io/opencharly/ubuntu-coder:latest
-            
-            # 4. Confirm adopt mode at runtime
-            charly shell ubuntu-coder -c "id"
-            # → uid=1000(ubuntu) gid=1000(ubuntu) ...
-            
-            # 5. Deploy + live tests
-            charly config ubuntu-coder
-            charly start ubuntu-coder
-            charly check box ghcr.io/opencharly/ubuntu-coder:latest
-            ```
-            
-            ## Gotcha: Dockerhub rate-limits during base pulls
-            
-            Rebuilding the `ubuntu` base image pulls from `docker.io/library/ubuntu:24.04`. Unauthenticated Dockerhub pulls are rate-limited (100/6h per IP). If the build fails with `toomanyrequests`, the cleanest workaround is to pull from a non-Dockerhub mirror and retag:
-            
-            ```bash
-            podman pull public.ecr.aws/docker/library/ubuntu:24.04
-            podman tag public.ecr.aws/docker/library/ubuntu:24.04 docker.io/library/ubuntu:24.04
-            charly box build ubuntu-coder
-            ```
-            
-            AWS ECR Public mirrors the Dockerhub library namespace without rate-limiting unauthenticated pulls.
-            
-            ## Ports
-            
-            | Port | Service | Bound by |
-            |---|---|---|
-            | 2222 | sshd-wrapper (SSH as `ubuntu` with sudo) | `/charly-coder:sshd` |
-            | 18765 | charly-mcp | `/charly-coder:charly-mcp` |
-            
-            Conflicts with the other three coder-family boxes on these ports.
-            
-            ## Image size
-            
-            ~10.2 GB uncompressed, nearly identical to `/charly-coder:debian-coder`.
-            
-            ## Cross-distro siblings
-            
-            - `/charly-coder:fedora-coder` — RPM-family, `user:user` create.
-            - `/charly-coder:arch-coder` — pacman-family + AUR, `user:user` create.
-            - `/charly-coder:debian-coder` — deb on Debian 13, `user:user` create.
-            - `/charly-coder:ubuntu-coder` — this box; deb on Ubuntu 24.04, `user:ubuntu` **adopt**.
-            
-            ## Related boxes
-            
-            - `/charly-distros:ubuntu` — parent base; declares `base_user:` in the embedded build vocabulary.
-            - `/charly-distros:ubuntu-builder` — multi-stage builder, also runs as `ubuntu:1000`.
-            
-            ## Related layers
-            
-            - `/charly-coder:sshd` — getent-based sudoers (works regardless of whether the uid-1000 account is `user` or `ubuntu`).
-            - `/charly-coder:dev-tools` — bat→batcat + fastfetch `exclude_distros`.
-            - `/charly-coder:language-runtimes` — Microsoft `dotnet-install.sh` for .NET 9.
-            - `/charly-infrastructure:virtualization` — `package:` + `package_map:` tests.
-            - `/charly-distros:container-nesting`, `/charly-tools:charly`, `/charly-coder:charly-mcp` — shared rootless baseline.
-            
-            ## Related commands
-            
-            - `/charly-image:image` — **`user_policy:` field** (the pivot for this box's behavior).
-            - `/charly-build:build` — **`base_user:` declaration** (where `ubuntu:1000` is declared).
-            - `/charly-check:check` — `exclude_distros:` field reference.
-            - `/charly-build:generate` — adopt-vs-create writeBootstrap emission.
-            - `/charly-core:shell`, `/charly-core:charly-config`, `/charly-core:start`, `/charly-core:stop`.
-            
-            ## When to use this skill
-            
-            **MUST be invoked** when:
-            
-            - Building, deploying, or troubleshooting `ubuntu-coder`.
-            - Debugging any behavior that depends on `${USER}` or `${HOME}` inside an Ubuntu container (they resolve to `ubuntu` / `/home/ubuntu`, not `user` / `/home/user`).
-            - Writing a candy whose content references the uid-1000 account by name — it must not hardcode `user`; use `getent passwd 1000` or `${USER}` substitution in task fields where the generator expands it.
-            - Understanding Dockerhub rate-limit workarounds during base-image rebuilds.
-ubuntu-debootstrap-builder-skill:
-    skill:
-        name: ubuntu-debootstrap-builder
-        family: distros
-        owner: ubuntu-debootstrap-builder
-        description: |-
-            Privileged debootstrap builder image (base: debian:13 — debootstrap is a
-            Debian tool that bootstraps Ubuntu suites too) — ships the debootstrap
-            toolchain for ubuntu-debootstrap and the ubuntu-debootstrap VM. Lives in the
-            opencharly/distro-ubuntu submodule (box/ubuntu).
-            MUST be invoked before building or troubleshooting ubuntu-debootstrap-builder.
-        content: |
-            # ubuntu-debootstrap-builder
-            
-            Privileged builder image that ships the **debootstrap** toolchain (the
-            `debootstrap-builder` candy). It is the `from: builder:debootstrap` /
-            `bootstrap_builder_image:` target for `/charly-distros:ubuntu-debootstrap` and the
-            `/charly-vm:ubuntu-debootstrap-vm` bootstrap VM.
-            
-            > **Lives in `opencharly/distro-ubuntu`** (git submodule at `box/ubuntu`). Build:
-            > `charly -C box/ubuntu box build ubuntu-debootstrap-builder`.
-            
-            ## Box Properties
-            
-            | Property | Value |
-            |----------|-------|
-            | Base | `debian:13` (debootstrap is a Debian tool — it bootstraps Ubuntu suites from a Debian builder) |
-            | Distro | debian:13, debian |
-            | Build | deb |
-            | Layer | `debootstrap-builder` (pulled by github reference from the main repo) |
-            | Home repo | opencharly/distro-ubuntu (`box/ubuntu`) |
-            
-            The `debootstrap-builder` candy **stays in the main repo** and is shared with
-            `/charly-distros:debian-debootstrap-builder` — both pull it by github reference. The
-            `ubuntu` distro config (`inherits: debian`; debootstrap suite `noble`, mirror
-            `http://archive.ubuntu.com/ubuntu`, base packages) lives in the main repo's
-            embedded `distro:` vocabulary (`charly/charly.yml`) and resolves automatically —
-            the submodule imports nothing (`import: []`).
-            
-            ## Cross-References
-            
-            - `/charly-distros:ubuntu` — the Docker-Hub base (`base: ubuntu:24.04`)
-            - `/charly-distros:ubuntu-debootstrap` — the bootstrap-from-scratch rootfs it builds
-            - `/charly-vm:ubuntu-debootstrap-vm` — the VM built via the same debootstrap path
-            - `/charly-distros:debian-debootstrap-builder` — the Debian sibling (same `base: debian:13`)
-            
-            ## When to Use This Skill
-            
-            **MUST be invoked** before building or debugging the Ubuntu debootstrap builder.
-            Invoke BEFORE reading source code or launching Explore agents.
-
-ubuntu-debootstrap-skill:
-    skill:
-        name: ubuntu-debootstrap
-        family: distros
-        owner: ubuntu-debootstrap
-        description: |-
-            Bootstrap-from-scratch Ubuntu 24.04 rootfs via debootstrap inside a privileged
-            builder (from: builder:debootstrap, bootstrap_builder_image:
-            ubuntu-debootstrap-builder). Retained for offline/air-gapped builds. Lives in
-            the opencharly/distro-ubuntu submodule (box/ubuntu).
-            MUST be invoked before building or troubleshooting ubuntu-debootstrap.
-        triggers:
-            - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
-        content: |
-            # ubuntu-debootstrap
-            
-            Bootstrap-from-scratch Ubuntu 24.04 (noble) root filesystem, built via
-            `debootstrap` inside the privileged `/charly-distros:ubuntu-debootstrap-builder`
-            container (`from: builder:debootstrap`,
-            `bootstrap_builder_image: ubuntu-debootstrap-builder`).
-            
-            > **Lives in `opencharly/distro-ubuntu`** (git submodule at `box/ubuntu`). Build:
-            > `charly -C box/ubuntu box build ubuntu-debootstrap`.
-            
-            ## When to use it (and when not)
-            
-            The canonical Ubuntu base (`/charly-distros:ubuntu`) pulls the upstream-published
-            `ubuntu:24.04` OCI image from Docker Hub — that is the recommended, faster path.
-            This debootstrap variant exists for **offline / air-gapped** builds and as a
-            worked example of the `from: builder:debootstrap` pattern.
-            
-            ## Box Properties
-            
-            | Property | Value |
-            |----------|-------|
-            | From | builder:debootstrap |
-            | bootstrap_builder_image | ubuntu-debootstrap-builder |
-            | Distro | ubuntu:24.04, ubuntu, debian |
-            | Build | deb |
-            | Home repo | opencharly/distro-ubuntu (`box/ubuntu`) |
-            
-            The `ubuntu` distro config (`inherits: debian`; debootstrap suite `noble`,
-            mirror `http://archive.ubuntu.com/ubuntu`, components `main,universe`) lives in
-            the embedded build vocabulary (`charly/charly.yml`, baked into the `charly`
-            binary). The embedded vocabulary carries BOTH the `ubuntu` and `debian` distro
-            configs, so the `inherits: debian` resolution needs no reference to
-            `opencharly/distro-debian`.
-            
-            ## Cross-References
-            
-            - `/charly-distros:ubuntu` — the recommended Docker-Hub base
-            - `/charly-distros:ubuntu-debootstrap-builder` — the privileged builder it uses
-            - `/charly-vm:ubuntu-debootstrap-vm` — the VM built via the same debootstrap path
-            
-            ## When to Use This Skill
-            
-            **MUST be invoked** before building or debugging the Ubuntu debootstrap rootfs.
-            Invoke BEFORE reading source code or launching Explore agents.
-
-ubuntu-skill:
-    skill:
-        name: ubuntu
-        family: distros
-        owner: ubuntu
-        description: |-
-            Base Ubuntu 24.04 noble image. Root of the box hierarchy for Ubuntu-
-            based builds. Runs as uid 1000 `ubuntu` via ADOPT mode — the upstream
-            ubuntu:24.04 base image ships a pre-existing ubuntu:ubuntu account,
-            and the embedded distro.ubuntu vocabulary declares base_user to adopt it verbatim.
-            MUST be invoked before building, deploying, configuring, or troubleshooting
-            any Ubuntu-based box.
-        triggers:
-            - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
-        content: |
-            # ubuntu
-            
-            Base Ubuntu 24.04 (noble) image. Distinguished from `/charly-distros:debian` by **adopt mode**: the upstream `ubuntu:24.04` base image ships a pre-existing `ubuntu:ubuntu` account at uid 1000, and the embedded `distro.ubuntu` vocabulary declares `base_user:` so the `charly` generator honors that account rather than creating a new one.
-            
-            The Ubuntu family lives in its own **`opencharly/distro-ubuntu`** repo (git submodule
-            at **`box/ubuntu`**) — a SEPARATE repo from `opencharly/distro-debian` (Debian and
-            Ubuntu each have their own repo). The `ubuntu` base is **owned there** and
-            composes the main repo's candies by git reference plus the embedded build vocabulary. Because
-            `distro.ubuntu` is `inherits: debian`, the embedded build vocabulary (which
-            carries BOTH distro configs) resolves the inheritance — `opencharly/distro-ubuntu`
-            needs no reference to `opencharly/distro-debian`. Build from the submodule:
-            `charly -C box/ubuntu box build ubuntu` (or `charly --repo opencharly/distro-ubuntu box build ubuntu`).
-            Nothing in main consumes any Ubuntu box, so there is **no main ↔ ubuntu coupling**.
-            
-            ## Box Properties
-            
-            | Property | Value |
-            |----------|-------|
-            | Base | `ubuntu:24.04` |
-            | Pkg | `deb` |
-            | Distro tags | `["ubuntu:24.04", "ubuntu"]` (symmetric with a `target: vm` deploy's `distroTagChain`; NO `debian` fallback — every deb-family layer carries an explicit `ubuntu` section, and the cascade would otherwise UNION debian-only packages onto ubuntu) |
-            | Layers | (none — base image only) |
-            | Platforms | `linux/amd64` |
-            | User | `ubuntu` / uid 1000 (**adopt mode**) |
-            | Home | `/home/ubuntu` |
-            | Registry | `ghcr.io/opencharly` |
-            
-            ## User model — adopt from base image
-            
-            The embedded `distro.ubuntu` vocabulary inherits from `distro.debian` (same apt bootstrap template) and adds a `base_user:` block:
-            
-            ```yaml
-            distro:
-              ubuntu:
-                inherits: debian
-                base_user:
-                  name: ubuntu
-                  uid: 1000
-                  gid: 1000
-                  home: /home/ubuntu
-            ```
-            
-            Any downstream image with `user_policy: auto` (the default) that **did not** explicitly set its own `user:` field will adopt this — `resolved.User = "ubuntu"`, `resolved.Home = "/home/ubuntu"`, `resolved.UserAdopted = true`. The bootstrap emits **no** `useradd`; it emits a one-line comment documenting the adoption:
-            
-            ```
-            # User ubuntu (uid=1000) adopted from base image (declared in charly/charly.yml distro.base_user) — no useradd needed
-            WORKDIR /home/ubuntu
-            USER 1000
-            ```
-            
-            This architecture is **declarative** (what the base image ships) + **policy-driven** (how to reconcile with the image's configured user). Three policy values:
-            
-            | Policy | Behavior on this base |
-            |--------|----------------------|
-            | `auto` (default) | Adopt `ubuntu:ubuntu` — image inherits the upstream account. |
-            | `adopt` | Same as auto here; hard-errors on bases without `base_user:`. |
-            | `create` | Override — force-create a different uid-1000 account (fails if `useradd` collides). |
-            
-            See `/charly-image:image` "user_policy" and `/charly-build:build` "base_user" for the full table covering all four distros.
-            
-            ## Why adopt over rename?
-            
-            Adopt mode honors the existing `ubuntu` account rather than renaming it to `user` via `usermod -l`, because:
-            
-            1. Ubuntu's cloud-init tooling, docs, and `/etc/passwd` metadata assume the account is named `ubuntu`.
-            2. Renaming is an invisible base-image mutation — breaks in hard-to-debug ways.
-            3. The rename approach doesn't scale to Debian cloud images (or future distros) that ship their own pre-existing uid-1000 accounts with different names.
-            
-            Adopt mode respects the base image's contract and scales declaratively. See `/charly-coder:sshd` for the `getent passwd 1000` pattern that makes candy content (sudoers in particular) work uniformly across both create and adopt modes.
-            
-            ## Bootstrap
-            
-            ```dockerfile
-            FROM ubuntu:24.04
-            RUN --mount=type=cache,dst=/var/cache/apt,sharing=locked
-                --mount=type=cache,dst=/var/lib/apt,sharing=locked
-                apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg && \
-                ... install go-task binary ...
-            # User ubuntu (uid=1000) adopted from base image (declared in charly/charly.yml distro.base_user) — no useradd needed
-            WORKDIR /home/ubuntu
-            USER 1000
-            ```
-            
-            ## Dockerhub rate-limit caveat
-            
-            The upstream `ubuntu:24.04` pull from Dockerhub is unauthenticated-rate-limited (100 pulls / 6h / IP). If `charly box build ubuntu` fails with `toomanyrequests`, pull from AWS ECR Public and retag:
-            
-            ```bash
-            podman pull public.ecr.aws/docker/library/ubuntu:24.04
-            podman tag public.ecr.aws/docker/library/ubuntu:24.04 docker.io/library/ubuntu:24.04
-            charly box build ubuntu
-            ```
-            
-            ECR Public mirrors the Dockerhub library namespace without rate-limiting.
-            
-            ## Downstream / sibling entries (all in opencharly/distro-ubuntu)
-            
-            - `/charly-distros:ubuntu-builder` — pixi/npm/cargo multi-stage builder.
-            - `/charly-coder:ubuntu-coder` — kitchen-sink dev box.
-            - `/charly-distros:ubuntu-debootstrap-builder` — privileged debootstrap builder (`base: debian:13`).
-            - `/charly-distros:ubuntu-debootstrap` — bootstrap-from-scratch rootfs.
-            - `/charly-vm:ubuntu-debootstrap-vm` — the `ubuntu-debootstrap` bootstrap VM + `check-ubuntu-debootstrap-vm` bed.
-            
-            ## Verification
-            
-            ```bash
-            charly -C box/ubuntu box build ubuntu
-            charly shell ubuntu                       # drops into /home/ubuntu as uid 1000
-            id                                    # uid=1000(ubuntu) gid=1000(ubuntu)
-            charly -C box/ubuntu box validate     # the embedded build vocabulary resolves distro.ubuntu (inherits debian)
-            ```
-            
-            ## Related boxes
-            
-            - `/charly-distros:debian` — sibling deb-family base without adopt mode (Debian 13 ships no pre-existing uid-1000 user).
-            - `/charly-distros:ubuntu-builder` — multi-stage builder.
-            - `/charly-coder:ubuntu-coder` — kitchen-sink dev box.
-            - `/charly-distros:fedora` — RPM-family counterpart.
-            - `/charly-distros:arch` — pacman-family counterpart.
-            
-            ## Related commands
-            
-            - `/charly-build:build` — `base_user:` declaration format, which lives in the embedded `distro.ubuntu` vocabulary.
-            - `/charly-image:image` — `user_policy:` field + reconciliation.
-            - `/charly-build:generate` — adopt-vs-create writeBootstrap emission.
-            
-            ## Related candies (cross-distro patterns this base enables)
-            
-            - `/charly-coder:sshd` — `getent passwd 1000`-based sudoers works for both `user` (create) and `ubuntu` (adopt).
-            - `/charly-coder:language-runtimes` — Microsoft `dotnet-install.sh` (Ubuntu noble doesn't ship dotnet-sdk-9.0 in main; Microsoft's noble apt repo only has 10.0; the dotnet-install.sh `--channel 9.0` is the cross-distro solution).
-            
-            ## When to use this skill
-            
-            **MUST be invoked** when:
-            
-            - Building or troubleshooting the `ubuntu` base image.
-            - Adding any Ubuntu-based box (it will inherit the adopt-mode `ubuntu:ubuntu` identity by default).
-            - Debugging `${USER}` / `${HOME}` differences between Ubuntu and other deb-based boxes (ubuntu-coder → `ubuntu:/home/ubuntu`; debian-coder → `user:/home/user`).
-            - Understanding why ubuntu-coder's `/etc/sudoers.d/charly-user` says `ubuntu ALL=(ALL) NOPASSWD: ALL` rather than `user`.
-

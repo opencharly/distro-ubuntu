@@ -1,0 +1,25 @@
+[Unit]
+# OpenCharly CI Docker daemon. Deliberately NOT docker.service:
+# the logging-collector lane runs
+# `systemctl stop docker.service docker.socket`, which must not
+# stop the daemon every co-tenant lane is using (RCA 2026-10-10).
+Description=OpenCharly CI Docker daemon (co-tenant-safe)
+After=network-online.target containerd.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+# Own socket path: a lane that relinks /var/run/docker.sock must
+# not be able to redirect this daemon's own socket.
+ExecStart=/usr/bin/dockerd -H unix:///run/docker-ci.sock --containerd=/run/containerd/containerd.sock
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutStartSec=0
+Restart=always
+RestartSec=2
+LimitNOFILE=infinity
+LimitNPROC=infinity
+Delegate=yes
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
