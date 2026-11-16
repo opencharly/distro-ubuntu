@@ -878,13 +878,6 @@ check-ubuntu-debootstrap-vm:
               command: grep -h 'pkgs[.]tailscale[.]com/stable/ubuntu noble' /etc/apt/sources.list.d/tailscale.list
 ubuntu-debootstrap:
     vm:
-        # EXPLICIT because the schema now REQUIRES them: spec v0.2026319 made
-        # #Vm.backend and #Vm.autostart `!`-required with NO default (they were
-        # `*"auto"` / `*false` before), so ApplyCueDefaults cannot materialize them and
-        # `vm create` fails with `applyCueDefaults vm: decode: backend: cannot convert
-        # non-concrete value string`.
-        backend: libvirt
-        autostart: false
         # Bootstrap-from-scratch via debootstrap inside the ubuntu-debootstrap-
         # builder container, then booted under libvirt/QEMU. The debootstrap
         # builder template + distro.ubuntu config (which inherits debian) resolve
