@@ -234,7 +234,7 @@ github-runner-ubuntu:
                   # A CURRENT git: the repo's provenance tests call `git --no-lazy-fetch` (added in
                   # 2.46), and the distro's git may be older than that. GitHub-hosted images carry a
                   # newer git, so this is hosted parity, not a local preference. Measured on the
-                  # previous Ubuntu baseline (resolute): the Scripts job failed with
+                  # previous Ubuntu baseline (noble): the Scripts job failed with
                   # `unknown option: --no-lazy-fetch`. Kept for 26.04 because this pin is not
                   # re-measured here, and a redundant PPA is harmless where a missing flag is not.
                   add-apt-repository -y ppa:git-core/ppa
