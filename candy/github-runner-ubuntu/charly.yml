@@ -197,7 +197,7 @@ github-runner-ubuntu:
               run_as: root
               context: [deploy]
               command: |
-                  printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable\n' > /etc/apt/sources.list.d/docker.list
+                  printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu resolute stable\n' > /etc/apt/sources.list.d/docker.list
             - run: "step 6 \u2014 apt-get update -qq"
               id: "cmd-06-apt-get-update-qq"
               run_as: root
@@ -209,7 +209,7 @@ github-runner-ubuntu:
               run_as: root
               context: [deploy]
               command: |
-                  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --allow-downgrades docker-ce=5:29.4.0-1~ubuntu.24.04~noble docker-ce-cli=5:29.4.0-1~ubuntu.24.04~noble containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+                  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --allow-downgrades docker-ce=5:29.4.0-1~ubuntu.26.04~resolute docker-ce-cli=5:29.4.0-1~ubuntu.26.04~resolute containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
             - run: "step 8 \u2014 apt-mark hold docker-ce docker-ce-cli"
               id: "cmd-08-apt-mark-hold-docker-ce-docker-ce-cli"
               run_as: root
@@ -231,10 +231,12 @@ github-runner-ubuntu:
                   export DEBIAN_FRONTEND=noninteractive
                   apt-get update -qq
                   apt-get install -y -qq --no-install-recommends software-properties-common
-                  # A CURRENT git: noble ships 2.43, and the repo's provenance tests call
-                  # `git --no-lazy-fetch` (added in 2.46). GitHub-hosted images carry a newer
-                  # git, so this is hosted parity, not a local preference. Measured: the
-                  # Scripts job failed with `unknown option: --no-lazy-fetch`.
+                  # A CURRENT git: the repo's provenance tests call `git --no-lazy-fetch` (added in
+                  # 2.46), and the distro's git may be older than that. GitHub-hosted images carry a
+                  # newer git, so this is hosted parity, not a local preference. Measured on the
+                  # previous Ubuntu baseline (resolute): the Scripts job failed with
+                  # `unknown option: --no-lazy-fetch`. Kept for 26.04 because this pin is not
+                  # re-measured here, and a redundant PPA is harmless where a missing flag is not.
                   add-apt-repository -y ppa:git-core/ppa
                   apt-get update -qq
                   # The full hosted-parity job toolchain, INCLUDING Chromium's runtime set.

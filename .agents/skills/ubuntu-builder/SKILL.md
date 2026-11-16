@@ -1,16 +1,16 @@
 ---
 name: ubuntu-builder
 description: |-
-  Minimal Ubuntu 24.04 builder image (pixi + Node.js + build-toolchain)
+  Minimal Ubuntu 26.04 builder image (pixi + Node.js + build-toolchain)
   used as the multi-stage builder for Ubuntu-based boxes. Runs as uid 1000 `ubuntu` (adopted from the upstream
-  ubuntu:24.04 base image via the embedded distro vocabulary's base_user declaration).
+  ubuntu:26.04 base image via the embedded distro vocabulary's base_user declaration).
   MUST be invoked before building, deploying, configuring, or troubleshooting
   the ubuntu-builder box.
 ---
 
 # ubuntu-builder
 
-Ubuntu 24.04 (noble) counterpart of `/charly-distros:fedora-builder` and `/charly-distros:debian-builder`. Same role — pixi/npm/cargo multi-stage builder — with one important difference: the builder runs as `ubuntu` (uid 1000) because the upstream `ubuntu:24.04` base image ships a pre-existing `ubuntu:ubuntu` account at uid 1000, and the embedded `distro.ubuntu.base_user` vocabulary adopts it.
+Ubuntu 26.04 (resolute) counterpart of `/charly-distros:fedora-builder` and `/charly-distros:debian-builder`. Same role — pixi/npm/cargo multi-stage builder — with one important difference: the builder runs as `ubuntu` (uid 1000) because the upstream `ubuntu:26.04` base image ships a pre-existing `ubuntu:ubuntu` account at uid 1000, and the embedded `distro.ubuntu.base_user` vocabulary adopts it.
 
 Lives in the **`opencharly/distro-ubuntu`** repo (git submodule at **`box/ubuntu`**).
 Build it from the submodule: `charly -C box/ubuntu box build ubuntu-builder`
@@ -22,7 +22,7 @@ main repo.
 
 | Property | Value |
 |----------|-------|
-| Base | `ubuntu` (which = `ubuntu:24.04` + our bootstrap) |
+| Base | `ubuntu` (which = `ubuntu:26.04` + our bootstrap) |
 | Layers | `pixi`, `nodejs`, `build-toolchain` |
 | Platforms | `linux/amd64` |
 | Registry | `ghcr.io/opencharly` |
@@ -31,7 +31,7 @@ main repo.
 
 ## Full candy stack
 
-1. `/charly-distros:ubuntu` — Ubuntu 24.04 + bootstrap. Inherits Debian's `apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg` pattern because the embedded `distro.ubuntu` vocabulary declares `inherits: debian`. Ubuntu-specific: `base_user: { name: ubuntu, uid: 1000, gid: 1000, home: /home/ubuntu }` — no `useradd` step emitted.
+1. `/charly-distros:ubuntu` — Ubuntu 26.04 + bootstrap. Inherits Debian's `apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg` pattern because the embedded `distro.ubuntu` vocabulary declares `inherits: debian`. Ubuntu-specific: `base_user: { name: ubuntu, uid: 1000, gid: 1000, home: /home/ubuntu }` — no `useradd` step emitted.
 2. `/charly-languages:pixi` — pixi package manager + env paths (`/home/ubuntu/.pixi`).
 3. `/charly-coder:nodejs` — Node.js + npm (generic `nodejs`).
 4. `/charly-coder:build-toolchain` — same Debian `-dev` packages as `/charly-distros:debian-builder`.

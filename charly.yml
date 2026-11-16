@@ -9,7 +9,7 @@
 #  EMBEDDED in the `charly` binary (`charly/charly.yml`) — not imported.
 #
 #  import: is EMPTY here (`import: []`). Ubuntu roots on EXTERNAL bases entirely
-#  (the `ubuntu` base is docker.io `ubuntu:24.04`, the debootstrap builder is
+#  (the `ubuntu` base is docker.io `ubuntu:26.04`, the debootstrap builder is
 #  `base: debian:13`), so it has NO cross-repo entity refs — and with the build
 #  vocabulary embedded in the binary, it imports NOTHING.
 #
@@ -68,7 +68,7 @@ import: []
 #     buildx state is per-user — the first version silently read root's empty state and
 #     a whitespace bug made it treat every builder's endpoint as gone (measured: it
 #     deleted 15 builders, two of them live).
-#   * unprivileged user namespaces are enabled: Ubuntu 24.04's AppArmor restriction
+#   * unprivileged user namespaces are enabled: Ubuntu 26.04's AppArmor restriction
 #     breaks lanes that sandbox with bubblewrap (`bwrap: loopback: Failed RTM_NEWADDR`).
 #   * 128 GiB disk / 32 GiB RAM / 16 vCPU / 8 GiB swapfile: sized from live measurements
 #     of four concurrent lanes (peak ~12 GiB on the 15 GiB original, 44 GiB of docker
@@ -85,7 +85,7 @@ githubrunner-ubuntu-disk:
         source:
             kind: cloud_image
             distro: ubuntu
-            url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+            url: https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img
             base_user: ubuntu
         disk_size: 128G
         ram: 4G
@@ -124,7 +124,7 @@ githubrunner-ubuntu:
         source:
             kind: cloud_image
             distro: ubuntu
-            url: https://cloud-images.ubuntu.com/noble/20260926/noble-server-cloudimg-amd64.img
+            url: https://cloud-images.ubuntu.com/resolute/20260927/resolute-server-cloudimg-amd64.img
             checksum: {type: sha256, value: 6a81c37564db9b1ee84e141922625e1d7c5b389b99bb3c572e0243607d5bb4d2}
             base_user: ubuntu
         backend: libvirt
@@ -164,7 +164,7 @@ githubrunner-ubuntu-vmi:
         distro: ubuntu
         ssh_user: ubuntu
         # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
-        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # ARTIFACT. That disk is built from the SAME resolute image by githubrunner-ubuntu-disk below
         # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
         # why data_volume+http cannot be used on this cluster).
         source:
@@ -224,7 +224,7 @@ githubrunner-ubuntu-vmi-4vcpu:
         distro: ubuntu
         ssh_user: ubuntu
         # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
-        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # ARTIFACT. That disk is built from the SAME resolute image by githubrunner-ubuntu-disk below
         # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
         # why data_volume+http cannot be used on this cluster).
         source:
@@ -279,7 +279,7 @@ githubrunner-ubuntu-vmi-8vcpu:
         distro: ubuntu
         ssh_user: ubuntu
         # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
-        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # ARTIFACT. That disk is built from the SAME resolute image by githubrunner-ubuntu-disk below
         # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
         # why data_volume+http cannot be used on this cluster).
         source:
@@ -345,7 +345,7 @@ githubrunner-ubuntu-vmi-16vcpu:
         distro: ubuntu
         ssh_user: ubuntu
         # KubeVirt cannot boot a cloud_image directly the way the vm substrate can; it boots a disk
-        # ARTIFACT. That disk is built from the SAME noble image by githubrunner-ubuntu-disk below
+        # ARTIFACT. That disk is built from the SAME resolute image by githubrunner-ubuntu-disk below
         # and pushed by charly, so both substrates still boot one Ubuntu image (see that entity for
         # why data_volume+http cannot be used on this cluster).
         source:
@@ -397,10 +397,10 @@ check-githubrunner-ubuntu-disk:
         disposable: true
         lifecycle: dev
         plan:
-            - check: command=test -f /etc/os-release && grep -q 'VERSION_CODENAME=noble' /etc/os-release && echo DISK-BUILD-OK
+            - check: command=test -f /etc/os-release && grep -q 'VERSION_CODENAME=resolute' /etc/os-release && echo DISK-BUILD-OK
               id: disk-built-and-bootable
               description: |
-                Proves the disk builder actually produced a bootable noble rootfs: this guest was booted
+                Proves the disk builder actually produced a bootable resolute rootfs: this guest was booted
                 from the built disk, so the assertion cannot pass if the build is broken.
               stdout:
                 - contains: DISK-BUILD-OK
@@ -409,7 +409,7 @@ check-githubrunner-ubuntu-disk:
               command: |
                 set -euo pipefail
                 test -f /etc/os-release
-                grep -q 'VERSION_CODENAME=noble' /etc/os-release
+                grep -q 'VERSION_CODENAME=resolute' /etc/os-release
                 echo DISK-BUILD-OK
         description: |
             R10 proof of githubrunner-ubuntu-disk. Fails without that entity, and therefore gives the
@@ -645,7 +645,7 @@ check-githubrunner-ubuntu-vm:
               id: unprivileged-user-namespaces
               description: |
                 Unprivileged user namespaces work in the guest, and the AppArmor restriction
-                Ubuntu 24.04 enables by default is off. This is what lets a lane sandbox
+                Ubuntu 26.04 enables by default is off. This is what lets a lane sandbox
                 itself with bubblewrap (Image Runtime Startup failed on 2026-10-10 with
                 `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`) and what any
                 rootless-container step inside a job needs. The command asserts the real
@@ -815,7 +815,7 @@ check-ubuntu-debootstrap-vm:
         from: ubuntu-debootstrap
         disposable: true
         lifecycle: dev
-        description: Sole proof the charly toolchain installs on a from-scratch debootstrap Ubuntu 24.04 VM — the charly candy's copy step lands the binary at /usr/bin/charly, the composed virtualization/gocryptfs/socat layers install their deps, and the tailscale apt-repo distro-cascade deterministically picks ubuntu/noble. Boots the ubuntu-debootstrap VM under libvirt/QEMU (UEFI-insecure, q35, ext4, an auto-allocated ssh port), overlays the charly candy via add_candy, then runs four guest command checks — the binary present and executable at /usr/bin/charly (CHARLY-BINARY-OK), the welded command plugins dispatching project-less (WELDED-CMD-PROJECT-LESS-OK), the tailscale package installed (TAILSCALE-PKG-OK), and grep of tailscale.list for 'stable/ubuntu noble'.
+        description: Sole proof the charly toolchain installs on a from-scratch debootstrap Ubuntu 26.04 VM — the charly candy's copy step lands the binary at /usr/bin/charly, the composed virtualization/gocryptfs/socat layers install their deps, and the tailscale apt-repo distro-cascade deterministically picks ubuntu/resolute. Boots the ubuntu-debootstrap VM under libvirt/QEMU (UEFI-insecure, q35, ext4, an auto-allocated ssh port), overlays the charly candy via add_candy, then runs four guest command checks — the binary present and executable at /usr/bin/charly (CHARLY-BINARY-OK), the welded command plugins dispatching project-less (WELDED-CMD-PROJECT-LESS-OK), the tailscale package installed (TAILSCALE-PKG-OK), and grep of tailscale.list for 'stable/ubuntu resolute'.
         # charly binary install witness: the charly candy's copy step lands the
         # in-development binary at /usr/bin/charly (the localpkg package install is
         # removed by the remove-candy-localpkg cutover). Every assertion below is
@@ -828,6 +828,12 @@ check-ubuntu-debootstrap-vm:
         # suite was selected, not that the package landed).
         add_candy:
             - '@github.com/opencharly/layer-charly:v2026.292.2352'
+            # The bed deploys onto a VM, so the "vm" deploy substrate must be in this bed's
+            # own candy closure — measured: without it, `deploy add` fails with
+            # `the "vm" deploy substrate is not available in this project — its deploy plugin
+            # (plugin-deploy-vm) is not in the candy closure`. Same remedy and same measured
+            # error as distro-cachyos's VM beds and charly-ubuntu's check-ubuntu-repo.
+            - '@github.com/opencharly/plugin-deploy-vm/candy/plugin-deploy-vm:v2026.314.0712'
         install_opts:
             allow_repo_changes: true
             allow_root_tasks: true
@@ -869,13 +875,13 @@ check-ubuntu-debootstrap-vm:
                 cd /tmp &&
                 /usr/bin/charly doctor 2>/dev/null | grep -q 'Summary:' &&
                 echo WELDED-CMD-PROJECT-LESS-OK
-            - check: command=grep -h 'pkgs[.]tailscale[.]com/stable/ubuntu noble' /etc/apt/sources.list.d/tailscale.list
-              id: tailscale-repo-suite-ubuntu-noble
-              description: distro-cascade resolves the ubuntu/noble tailscale apt repo (not debian/trixie) deterministically
+            - check: command=grep -h 'pkgs[.]tailscale[.]com/stable/ubuntu resolute' /etc/apt/sources.list.d/tailscale.list
+              id: tailscale-repo-suite-ubuntu-resolute
+              description: distro-cascade resolves the ubuntu/resolute tailscale apt repo (not debian/trixie) deterministically
               exit_status: 0
               context:
                 - runtime
-              command: grep -h 'pkgs[.]tailscale[.]com/stable/ubuntu noble' /etc/apt/sources.list.d/tailscale.list
+              command: grep -h 'pkgs[.]tailscale[.]com/stable/ubuntu resolute' /etc/apt/sources.list.d/tailscale.list
 ubuntu-debootstrap:
     vm:
         # Bootstrap-from-scratch via debootstrap inside the ubuntu-debootstrap-

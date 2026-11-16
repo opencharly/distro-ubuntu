@@ -35,7 +35,7 @@ Canonical files:
 
 ## Load these skills first (R0)
 
-- `/charly-distros:ubuntu` — the Ubuntu 24.04 base image (adopt-mode uid-1000
+- `/charly-distros:ubuntu` — the Ubuntu 26.04 base image (adopt-mode uid-1000
   `ubuntu`).
 - `/charly-distros:ubuntu-builder` — the multi-stage builder image.
 - `/charly-distros:ubuntu-debootstrap`,
