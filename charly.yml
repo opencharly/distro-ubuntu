@@ -878,6 +878,13 @@ check-ubuntu-debootstrap-vm:
               command: grep -h 'pkgs[.]tailscale[.]com/stable/ubuntu noble' /etc/apt/sources.list.d/tailscale.list
 ubuntu-debootstrap:
     vm:
+        # EXPLICIT because the schema now REQUIRES them: spec v0.2026319 made
+        # #Vm.backend and #Vm.autostart `!`-required with NO default (they were
+        # `*"auto"` / `*false` before), so ApplyCueDefaults cannot materialize them and
+        # `vm create` fails with `applyCueDefaults vm: decode: backend: cannot convert
+        # non-concrete value string`.
+        backend: libvirt
+        autostart: false
         # Bootstrap-from-scratch via debootstrap inside the ubuntu-debootstrap-
         # builder container, then booted under libvirt/QEMU. The debootstrap
         # builder template + distro.ubuntu config (which inherits debian) resolve
@@ -934,11 +941,6 @@ githubrunner-ubuntu-skill:
             - "The CI-runner Ubuntu VM / `githubrunner-ubuntu` / the `check-githubrunner-ubuntu-vm` bed"
             - "A CI lane failing on a self-hosted Ubuntu runner (docker daemon, disk, buildx builder)"
 
-# The ClawSweeper review bed. A disposable pod runs the image against a TWO-COMMIT fixture
-# whose second commit introduces a deliberate defect, and asserts that the engine loads and
-# reaches the model boundary. A check bed exports NO secret, so the model leg cannot run here;
-# it is never mocked either (R8) — the live round-trip is the advisory workflow's job, where
-# the org key exists.
 # ---------------------------------------------------------------------------
 # The verb/schema skills this repo's own candy owns — routing only.
 #
