@@ -16,7 +16,7 @@ carries both distro configs, so the inheritance resolves with no import.
 | Kind | Entries |
 |---|---|
 | Base / builder | `ubuntu` (base), `ubuntu-builder` (pixi/npm/cargo multi-stage builder) |
-| Images | `ubuntu-coder` (kitchen-sink dev box), `ubuntu-debootstrap-builder` (`base: debian:13`), `ubuntu-debootstrap` (`from: builder:debootstrap`) |
+| Images | `ubuntu-debootstrap-builder` (`base: debian:13`), `ubuntu-debootstrap` (`from: builder:debootstrap`) |
 | VM | `ubuntu-debootstrap` (bootstrap-from-scratch via `debootstrap`), `githubrunner-ubuntu` (co-tenant-safe CI-runner VM for the org's self-hosted fleet) |
 | Check bed | `check-ubuntu-debootstrap-vm` (disposable bootstrap-VM bed), `check-githubrunner-ubuntu-vm` (CI-runner VM R10 bed) |
 
@@ -29,7 +29,7 @@ embedded `distro.ubuntu` vocabulary adopts it rather than creating a new user.
 Nothing in the main `opencharly` repo consumes any Ubuntu image (no
 `base: ubuntu` image stays in main), so there is no main ↔ ubuntu coupling: the
 only edge is `ubuntu → main` (this repo pulls candies via `@github` refs). The
-image DAG is acyclic (`ubuntu-coder → ubuntu → docker.io/ubuntu:24.04`;
+image DAG is acyclic (`ubuntu-builder → ubuntu → docker.io/ubuntu:24.04`;
 `ubuntu-debootstrap → ubuntu-debootstrap-builder → docker.io/debian:13`).
 
 ## Build
@@ -99,9 +99,9 @@ config schema is newer than the binary supports).
   `check-ubuntu-debootstrap-vm` bed, and the `githubrunner-ubuntu` `skill:`
   entity as **routing metadata only** (its body lives beside the
   `github-runner-ubuntu` candy that owns it).
-- `candy/ubuntu-skills/charly.yml` — the `ubuntu-skills` bundle candy: the five
+- `candy/ubuntu-skills/charly.yml` — the `ubuntu-skills` bundle candy: the four
   `skill:` entities an IMAGE may not own (opencharly/sdk#434) — `ubuntu`,
-  `ubuntu-builder`, `ubuntu-coder`, `ubuntu-debootstrap`,
+  `ubuntu-builder`, `ubuntu-debootstrap`,
   `ubuntu-debootstrap-builder` — composed into every image that carries one of
   them, with the bodies beside it under `.agents/skills/<name>/SKILL.md`.
 - `box/<name>/charly.yml` — one manifest per image / builder / VM box.
@@ -112,7 +112,7 @@ config schema is newer than the binary supports).
 
 - Owning skills: `/charly-distros:ubuntu`, `/charly-distros:ubuntu-builder`,
   `/charly-distros:ubuntu-debootstrap`,
-  `/charly-distros:ubuntu-debootstrap-builder`, `/charly-coder:ubuntu-coder`
+  `/charly-distros:ubuntu-debootstrap-builder`
 - Bootstrap VM: `/charly-vm:ubuntu-debootstrap-vm`
 - Sibling: `/charly-distros:debian` (deb-family, create mode)
 - [`opencharly/charly`](https://github.com/opencharly/charly) — the charly CLI and image builder

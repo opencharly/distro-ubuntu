@@ -107,7 +107,6 @@ ECR Public mirrors the Dockerhub library namespace without rate-limiting.
 ## Downstream / sibling entries (all in opencharly/distro-ubuntu)
 
 - `/charly-distros:ubuntu-builder` — pixi/npm/cargo multi-stage builder.
-- `/charly-coder:ubuntu-coder` — kitchen-sink dev box.
 - `/charly-distros:ubuntu-debootstrap-builder` — privileged debootstrap builder (`base: debian:13`).
 - `/charly-distros:ubuntu-debootstrap` — bootstrap-from-scratch rootfs.
 - `/charly-vm:ubuntu-debootstrap-vm` — the `ubuntu-debootstrap` bootstrap VM + `check-ubuntu-debootstrap-vm` bed.
@@ -125,7 +124,6 @@ charly -C box/ubuntu box validate     # the embedded build vocabulary resolves d
 
 - `/charly-distros:debian` — sibling deb-family base without adopt mode (Debian 13 ships no pre-existing uid-1000 user).
 - `/charly-distros:ubuntu-builder` — multi-stage builder.
-- `/charly-coder:ubuntu-coder` — kitchen-sink dev box.
 - `/charly-distros:fedora` — RPM-family counterpart.
 - `/charly-distros:arch` — pacman-family counterpart.
 
@@ -146,5 +144,5 @@ charly -C box/ubuntu box validate     # the embedded build vocabulary resolves d
 
 - Building or troubleshooting the `ubuntu` base image.
 - Adding any Ubuntu-based box (it will inherit the adopt-mode `ubuntu:ubuntu` identity by default).
-- Debugging `${USER}` / `${HOME}` differences between Ubuntu and other deb-based boxes (ubuntu-coder → `ubuntu:/home/ubuntu`; debian-coder → `user:/home/user`).
-- Understanding why ubuntu-coder's `/etc/sudoers.d/charly-user` says `ubuntu ALL=(ALL) NOPASSWD: ALL` rather than `user`.
+- Debugging `${USER}` / `${HOME}` differences between Ubuntu and other deb-based boxes (`ubuntu`/`ubuntu-builder` → `ubuntu:/home/ubuntu`; `debian` → `user:/home/user`).
+- Understanding why the Ubuntu boxes' `/etc/sudoers.d/charly-user` says `ubuntu ALL=(ALL) NOPASSWD: ALL` rather than `user`.

@@ -2,8 +2,7 @@
 name: ubuntu-builder
 description: |-
   Minimal Ubuntu 24.04 builder image (pixi + Node.js + build-toolchain)
-  used as the multi-stage builder for Ubuntu-based boxes — currently
-  ubuntu-coder. Runs as uid 1000 `ubuntu` (adopted from the upstream
+  used as the multi-stage builder for Ubuntu-based boxes. Runs as uid 1000 `ubuntu` (adopted from the upstream
   ubuntu:24.04 base image via the embedded distro vocabulary's base_user declaration).
   MUST be invoked before building, deploying, configuring, or troubleshooting
   the ubuntu-builder box.
@@ -15,7 +14,7 @@ Ubuntu 24.04 (noble) counterpart of `/charly-distros:fedora-builder` and `/charl
 
 Lives in the **`opencharly/distro-ubuntu`** repo (git submodule at **`box/ubuntu`**).
 Build it from the submodule: `charly -C box/ubuntu box build ubuntu-builder`
-(normally builds implicitly as a dependency of `ubuntu-coder`). Its
+(built implicitly when an Ubuntu-based box needs a pixi/npm/cargo stage). Its
 `pixi`/`nodejs`/`build-toolchain` candies are pulled by github reference from the
 main repo.
 
@@ -61,7 +60,7 @@ ubuntu:
     cargo: ubuntu-builder
 ```
 
-During `charly box build ubuntu-coder`, cargo/npm/pixi-owning candies get their `FROM ubuntu-builder AS <layer>-<type>-build` stages from this image, then `COPY --from=<stage> --chown=1000:1000 /home/ubuntu /home/ubuntu` into the final ubuntu-coder. (The `--chown=1000:1000` numeric form works uniformly regardless of user name — see `/charly-coder:build-toolchain` for the builder-artifact COPY pattern.)
+During any Ubuntu-based box build, cargo/npm/pixi-owning candies get their `FROM ubuntu-builder AS <layer>-<type>-build` stages from this image, then `COPY --from=<stage> --chown=1000:1000 /home/ubuntu /home/ubuntu` into the final image. (The `--chown=1000:1000` numeric form works uniformly regardless of user name — see `/charly-coder:build-toolchain` for the builder-artifact COPY pattern.)
 
 ## Cross-distro sibling builders
 
@@ -79,7 +78,8 @@ charly shell ubuntu-builder               # drops you into /home/ubuntu as uid 1
 id                                    # uid=1000(ubuntu) gid=1000(ubuntu)
 ```
 
-Typically not invoked directly — it's a build-time dependency of `/charly-coder:ubuntu-coder`.
+Typically not invoked directly — it is a build-time dependency of any Ubuntu-based box that
+composes a pixi/npm/cargo-owning candy.
 
 ## Verification
 
@@ -90,7 +90,6 @@ Typically not invoked directly — it's a build-time dependency of `/charly-code
 ## Related boxes
 
 - `/charly-distros:ubuntu` — parent base; declares `base_user:` in the embedded distro vocabulary.
-- `/charly-coder:ubuntu-coder` — the consumer that this builder serves.
 - `/charly-distros:debian-builder` — deb-family sibling without adopt mode.
 - `/charly-distros:fedora-builder` — canonical RPM-family sibling.
 
@@ -109,5 +108,5 @@ Typically not invoked directly — it's a build-time dependency of `/charly-code
 **MUST be invoked** when:
 
 - Building or troubleshooting `ubuntu-builder` itself.
-- Debugging multi-stage COPY-from errors or permission issues in a `ubuntu-coder` build (this is the source stage; uid 1000 = `ubuntu` by adoption).
+- Debugging multi-stage COPY-from errors or permission issues in an Ubuntu-based build (this is the source stage; uid 1000 = `ubuntu` by adoption).
 - Understanding why `${HOME}` = `/home/ubuntu` (not `/home/user`) inside builder stages.

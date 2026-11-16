@@ -13,21 +13,21 @@ Canonical files:
   (`githubrunner-ubuntu`, owned by the `github-runner-ubuntu` candy that is the
   `githubrunner-ubuntu` VM's extracted payload) as **routing metadata only**.
 - `candy/ubuntu-skills/charly.yml` — the `ubuntu-skills` bundle candy PLUS the
-  five `skill:` entities whose only other owner was an image (`ubuntu`,
-  `ubuntu-builder`, `ubuntu-coder`, `ubuntu-debootstrap`,
+  four `skill:` entities whose only other owner was an image (`ubuntu`,
+  `ubuntu-builder`, `ubuntu-debootstrap`,
   `ubuntu-debootstrap-builder`), each with `owner: ubuntu-skills`. A skill's
   `owner:` must be a CANDY: an image is a `candy:` node carrying
   `base:`/`from:`, so it has no source directory, its skill's prose can never be
   read and the node never reaches the `ai.opencharly.skill` label
   (opencharly/sdk#434). The candy is composed into every image that carries one
   of those skills.
-- `.agents/skills/<name>/SKILL.md` — the six skill BODIES, one directory per
+- `.agents/skills/<name>/SKILL.md` — the five skill BODIES, one directory per
   entity's `name:`, at THIS REPO'S ROOT — never in a candy directory. The root
   is the directory a harness rooted here discovers natively and the base the
   marketplace corpus reads, so the corpus and the `ai.opencharly.skill` label
-  name the same file (`deploykit.candyRepoRoot`, opencharly/sdk#445). Five of the
+  name the same file (`deploykit.candyRepoRoot`, opencharly/sdk#445). Four of the
   bodies belong to `ubuntu-skills`, one to `github-runner-ubuntu`. The files are
-  the source of record for the prose; five of the six entities carry
+  the source of record for the prose; four of the five entities carry
   `triggers:`, and `ubuntu-debootstrap-builder` does not.
 - `box/<name>/charly.yml` — one manifest per image / builder / VM box.
 - `.github/workflows/tag-on-merge.yml` — CalVer tag + `CHANGELOG/` on merge.
@@ -40,7 +40,6 @@ Canonical files:
 - `/charly-distros:ubuntu-builder` — the multi-stage builder image.
 - `/charly-distros:ubuntu-debootstrap`,
   `/charly-distros:ubuntu-debootstrap-builder` — the bootstrap path.
-- `/charly-coder:ubuntu-coder` — the kitchen-sink dev image.
 - `/charly-vm:ubuntu-debootstrap-vm` — the bootstrap VM + its check bed.
 - `/charly-image:image` + `/charly-image:layer` — composition and candy
   authoring (`charly.yml` schema, `plan:` step verbs, service declarations).
@@ -67,8 +66,8 @@ Canonical files:
   belongs in its own `layer-*` repo and is referenced here by a pinned `@github`
   ref.
 - Preserve the adopt-mode `ubuntu:ubuntu` identity: `${USER}`/`${HOME}` differ
-  from the other deb-based boxes (`ubuntu-coder` → `ubuntu:/home/ubuntu`;
-  `debian-coder` → `user:/home/user`).
+  from the other deb-based boxes (`ubuntu`/`ubuntu-builder` →
+  `ubuntu:/home/ubuntu`; `debian` → `user:/home/user`).
 - New behaviour claims belong in a `plan:` as an observable `check:` step, and
   in the owning skill.
 

@@ -2,7 +2,7 @@
 #  opencharly repo (2026-05). Mounted as a git submodule at box/ubuntu.
 #
 #  SINGLE-FILE config (2026-05 import-namespace cutover): every local entity
-#  (the ubuntu base + debootstrap family, the ubuntu-coder/-builder images, the
+#  (the ubuntu base + debootstrap family, the ubuntu-builder image, the
 #  ubuntu bootstrap VM, and the disposable check bed) is inlined here. This repo
 #  VENDORS NOTHING — every layer is an `@github.com/...` ref into main's shared
 #  candy library, and the shared build-config (distro/builder/init vocabulary) is
@@ -876,36 +876,6 @@ check-ubuntu-debootstrap-vm:
               context:
                 - runtime
               command: grep -h 'pkgs[.]tailscale[.]com/stable/ubuntu noble' /etc/apt/sources.list.d/tailscale.list
-# Disposable R10 pod bed for the ubuntu-coder image (kind:check, target:pod) —
-# the pod x ubuntu cross-cell the bootstrap-VM bed above does not cover. Mirrors
-# check-fedora-coder-pod on the deb substrate; ports auto-allocate on 127.0.0.1
-# at deploy (no port: pin), so a run never collides with a production deploy or a
-# concurrent bed. The composed candies' baked file/package/service/command checks
-# (incl. the noble exclude_distros package divergences) run via `charly check
-# live`; this bed adds a host-side status assertion + a noble base-identity probe.
-check-ubuntu-coder-pod:
-    pod:
-        image: ubuntu-coder
-        disposable: true
-        lifecycle: dev
-        description: R10 bed for the ubuntu-coder image — proves the Ubuntu developer pod (sshd + language runtimes + AI CLIs on the Ubuntu 24.04 noble base) builds and runs as one composed pod. Builds box:ubuntu-coder, deploys, runs the composed baked file/package/service/command checks + charly status --json, and exercises the noble exclude_distros package divergences.
-        plan:
-            - check: command=charly status --json
-              id: status-shows-pod
-              stdout:
-                - contains: '"kind": "pod"'
-                - contains: check-ubuntu-coder-pod
-              context:
-                - runtime
-              command:
-                command: charly status --json
-                in_container: false
-            - check: the guest base is Ubuntu noble (not Debian)
-              id: noble-base-identity
-              exit_status: 0
-              context:
-                - runtime
-              command: grep -q 'VERSION_CODENAME=noble' /etc/os-release
 ubuntu-debootstrap:
     vm:
         # Bootstrap-from-scratch via debootstrap inside the ubuntu-debootstrap-
