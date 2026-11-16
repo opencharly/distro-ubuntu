@@ -14,7 +14,7 @@
 ubuntu-skills:
     candy:
         description: |
-            Skill-prose bundle for the ubuntu image family: owns the `ubuntu`, `ubuntu-builder`, `ubuntu-coder`, `ubuntu-debootstrap-builder`, `ubuntu-debootstrap` `skill:`
+            Skill-prose bundle for the ubuntu image family: owns the `ubuntu`, `ubuntu-builder`, `ubuntu-debootstrap-builder`, `ubuntu-debootstrap` `skill:`
             entities (sibling nodes in this file) and carries their bodies under
             .agents/skills/<name>/SKILL.md.
             It exists because a `skill:` node's owner must be a candy, not an image — an image has
@@ -39,7 +39,7 @@ ubuntu-skills:
                   set -eu
                   H="$(awk -F: '$3 == 1000 { print $6 }' /etc/passwd)"
                   test -n "$H"
-                  for s in ubuntu ubuntu-builder ubuntu-coder ubuntu-debootstrap-builder ubuntu-debootstrap; do
+                  for s in ubuntu ubuntu-builder ubuntu-debootstrap-builder ubuntu-debootstrap; do
                       test -s "$H/.agents/skills/$s/SKILL.md"
                   done
 ubuntu-skill:
@@ -53,13 +53,6 @@ ubuntu-builder-skill:
     skill:
         name: ubuntu-builder
         family: distros
-        owner: ubuntu-skills
-        triggers:
-            - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
-ubuntu-coder-skill:
-    skill:
-        name: ubuntu-coder
-        family: coder
         owner: ubuntu-skills
         triggers:
             - "Ubuntu images / `ubuntu*` / `box/ubuntu` submodule"
