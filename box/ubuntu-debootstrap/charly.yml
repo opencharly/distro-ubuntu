@@ -6,7 +6,7 @@ ubuntu-debootstrap:
         build:
             - deb
         distro:
-            - ubuntu:24.04
+            - ubuntu:26.04
             - ubuntu
         # The skill-prose bundle: a `skill:` node's owner must be a candy, not an image
         # (opencharly/sdk#434), so the image-owned skill nodes are owned by `ubuntu-skills` and it rides

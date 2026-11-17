@@ -1,9 +1,9 @@
 ---
 name: ubuntu
 description: |-
-  Base Ubuntu 24.04 noble image. Root of the box hierarchy for Ubuntu-
+  Base Ubuntu 26.04 resolute image. Root of the box hierarchy for Ubuntu-
   based builds. Runs as uid 1000 `ubuntu` via ADOPT mode — the upstream
-  ubuntu:24.04 base image ships a pre-existing ubuntu:ubuntu account,
+  ubuntu:26.04 base image ships a pre-existing ubuntu:ubuntu account,
   and the embedded distro.ubuntu vocabulary declares base_user to adopt it verbatim.
   MUST be invoked before building, deploying, configuring, or troubleshooting
   any Ubuntu-based box.
@@ -11,7 +11,7 @@ description: |-
 
 # ubuntu
 
-Base Ubuntu 24.04 (noble) image. Distinguished from `/charly-distros:debian` by **adopt mode**: the upstream `ubuntu:24.04` base image ships a pre-existing `ubuntu:ubuntu` account at uid 1000, and the embedded `distro.ubuntu` vocabulary declares `base_user:` so the `charly` generator honors that account rather than creating a new one.
+Base Ubuntu 26.04 (resolute) image. Distinguished from `/charly-distros:debian` by **adopt mode**: the upstream `ubuntu:26.04` base image ships a pre-existing `ubuntu:ubuntu` account at uid 1000, and the embedded `distro.ubuntu` vocabulary declares `base_user:` so the `charly` generator honors that account rather than creating a new one.
 
 The Ubuntu family lives in its own **`opencharly/distro-ubuntu`** repo (git submodule
 at **`box/ubuntu`**) — a SEPARATE repo from `opencharly/distro-debian` (Debian and
@@ -27,9 +27,9 @@ Nothing in main consumes any Ubuntu box, so there is **no main ↔ ubuntu coupli
 
 | Property | Value |
 |----------|-------|
-| Base | `ubuntu:24.04` |
+| Base | `ubuntu:26.04` |
 | Pkg | `deb` |
-| Distro tags | `["ubuntu:24.04", "ubuntu"]` (symmetric with a `target: vm` deploy's `distroTagChain`; NO `debian` fallback — every deb-family layer carries an explicit `ubuntu` section, and the cascade would otherwise UNION debian-only packages onto ubuntu) |
+| Distro tags | `["ubuntu:26.04", "ubuntu"]` (symmetric with a `target: vm` deploy's `distroTagChain`; NO `debian` fallback — every deb-family layer carries an explicit `ubuntu` section, and the cascade would otherwise UNION debian-only packages onto ubuntu) |
 | Layers | (none — base image only) |
 | Platforms | `linux/amd64` |
 | User | `ubuntu` / uid 1000 (**adopt mode**) |
@@ -82,7 +82,7 @@ Adopt mode respects the base image's contract and scales declaratively. See `/ch
 ## Bootstrap
 
 ```dockerfile
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 RUN --mount=type=cache,dst=/var/cache/apt,sharing=locked
     --mount=type=cache,dst=/var/lib/apt,sharing=locked
     apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg && \
@@ -94,11 +94,11 @@ USER 1000
 
 ## Dockerhub rate-limit caveat
 
-The upstream `ubuntu:24.04` pull from Dockerhub is unauthenticated-rate-limited (100 pulls / 6h / IP). If `charly box build ubuntu` fails with `toomanyrequests`, pull from AWS ECR Public and retag:
+The upstream `ubuntu:26.04` pull from Dockerhub is unauthenticated-rate-limited (100 pulls / 6h / IP). If `charly box build ubuntu` fails with `toomanyrequests`, pull from AWS ECR Public and retag:
 
 ```bash
-podman pull public.ecr.aws/docker/library/ubuntu:24.04
-podman tag public.ecr.aws/docker/library/ubuntu:24.04 docker.io/library/ubuntu:24.04
+podman pull public.ecr.aws/docker/library/ubuntu:26.04
+podman tag public.ecr.aws/docker/library/ubuntu:26.04 docker.io/library/ubuntu:26.04
 charly box build ubuntu
 ```
 
@@ -136,7 +136,7 @@ charly -C box/ubuntu box validate     # the embedded build vocabulary resolves d
 ## Related candies (cross-distro patterns this base enables)
 
 - `/charly-coder:sshd` — `getent passwd 1000`-based sudoers works for both `user` (create) and `ubuntu` (adopt).
-- `/charly-coder:language-runtimes` — Microsoft `dotnet-install.sh` (Ubuntu noble doesn't ship dotnet-sdk-9.0 in main; Microsoft's noble apt repo only has 10.0; the dotnet-install.sh `--channel 9.0` is the cross-distro solution).
+- `/charly-coder:language-runtimes` — Microsoft `dotnet-install.sh` (Ubuntu resolute doesn't ship dotnet-sdk-9.0 in main; Microsoft's resolute apt repo only has 10.0; the dotnet-install.sh `--channel 9.0` is the cross-distro solution).
 
 ## When to use this skill
 
