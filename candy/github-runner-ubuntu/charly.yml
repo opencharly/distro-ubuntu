@@ -171,6 +171,19 @@ github-runner-ubuntu:
               mode: "0644"
               run_as: root
               id: "file-12-99-charly-ci-userns-conf"
+            - run: "apply the userns sysctl now — a sysctl.d drop-in is inert until systemd-sysctl runs at boot"
+              # MEASURED on 26.04: the drop-in above sets
+              # kernel.apparmor_restrict_unprivileged_userns=0, but installing the file does not
+              # APPLY it. The bed checks immediately after deploy, on a guest that has not
+              # rebooted, so it read the distro default — which 26.04 sets to 1 — and failed with
+              #   Security violation: Requested utility `Runner` does not match executable name
+              # for every bwrap/rootless lane. 24.04 masked this because its default agreed with
+              # the file; the file was never the whole fix.
+              command: |
+                  sysctl -p /etc/sysctl.d/99-charly-ci-userns.conf
+              run_as: root
+              context: [runtime]
+              id: "apply-userns-sysctl"
             - run: "install /etc/systemd/journald.conf.d/charly-ci.conf as 0644"
               copy: "files/etc/systemd/journald.conf.d/charly-ci.conf"
               to: "/etc/systemd/journald.conf.d/charly-ci.conf"
