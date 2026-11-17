@@ -599,8 +599,13 @@ github-runner-ubuntu:
                     lsmod 2>/dev/null | grep -E '^kvm' || echo "  (no kvm module loaded)" >&2
                     exit 1; fi
                   if ! sudo -u ubuntu test -w /dev/kvm; then
-                    echo "FAIL: /dev/kvm exists but the ubuntu user cannot write it" >&2
-                    ls -l /dev/kvm >&2; exit 1; fi
+                    # The run summary truncates stderr at ~100 chars, so the DECISIVE comparison
+                    # goes first: the device's gid against the kvm group's gid against the groups
+                    # the runner's own sudo process actually carries.
+                    echo "FAIL acl=$(getfacl -cp /dev/kvm 2>/dev/null | grep -E '^(user|group|mask|other)' | tr '\n' ';') test=$(sudo -u ubuntu sh -c 'test -w /dev/kvm; echo $?')" >&2
+                    echo "mode=$(stat -c '%a %U %G' /dev/kvm) nG=$(id -nG ubuntu | tr ' ' ',')" >&2
+                    ls -l /dev/kvm >&2
+                    exit 1; fi
                   echo kvm-device-ok
             # The k3s lanes `sudo modprobe br_netfilter` and set the bridge sysctl. Both are
             # host-root operations, so the image performs them at boot and this asserts the
