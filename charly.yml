@@ -124,8 +124,8 @@ githubrunner-ubuntu:
         source:
             kind: cloud_image
             distro: ubuntu
-            url: https://cloud-images.ubuntu.com/noble/20260926/noble-server-cloudimg-amd64.img
-            checksum: {type: sha256, value: 6a81c37564db9b1ee84e141922625e1d7c5b389b99bb3c572e0243607d5bb4d2}
+            url: https://cloud-images.ubuntu.com/resolute/20260927/resolute-server-cloudimg-amd64.img
+            checksum: {type: sha256, value: 8800651811af9a85465ad1d552add729947bb16488dddb4a9b5305a3d97332b2}
             base_user: ubuntu
         backend: libvirt
         disk_size: 128G
@@ -144,6 +144,32 @@ githubrunner-ubuntu:
         # (decision D1, issue 37).
         cloud_init:
             timezone: UTC
+        # Ubuntu 26.04 gates qemu-guest-agent.service on a virtio-serial port
+        # (dev-virtio\x2dports-org.qemu.guest_agent.0.device). Without the channel that
+        # .device never appears, the unit's start job fails, and the PACKAGE'S OWN
+        # postinst returns non-zero - which aborts the apt transaction and therefore the
+        # deploy, before any charly step runs. 24.04 tolerated the same absence; 26.04
+        # does not. The channel is declared here rather than in the candy because it is
+        # a property of THIS VM, not of the recipe installed into it
+        # (opencharly/distro-ubuntu#67).
+        libvirt:
+            # NESTED VIRTUALISATION. The runner's k3s/dind lanes want /dev/kvm, and the bed's
+            # check-kvm-device asserts it whenever /proc/cpuinfo exposes svm/vmx. A guest that
+            # sees the flags but cannot load kvm still has no /dev/kvm, so the CPU model is
+            # passed through rather than synthesized.
+            cpu:
+                mode: host-passthrough
+            # The fragment must nest inside <devices>: xml_passthrough is unmarshalled as a
+            # <domain> body and merged field-wise, and only the CHILDREN of <devices> are
+            # appended (Channels, Controllers, ...). A top-level <channel> parses into a
+            # Domain field that libvirt does not read, so it is silently dropped.
+            xml_passthrough: |
+                <devices>
+                  <controller type='virtio-serial' index='0'/>
+                  <channel type='unix'>
+                    <target type='virtio' name='org.qemu.guest_agent.0'/>
+                  </channel>
+                </devices>
 # Disposable R10 bed for the CI-runner VM entity above. `disposable: true` is the sole
 # authorization for the unattended destroy+rebuild `charly check run` drives. Every step
 # is anchored on the MECHANISM it proves, never on a proxy for it: the pinned Docker
@@ -621,12 +647,18 @@ check-githubrunner-ubuntu-vm:
                   sudo -u ubuntu docker buildx rm --force "$b" >/dev/null 2>&1 || true
                   sudo -u ubuntu docker rm -f "buildx_buildkit_${b}0" >/dev/null 2>&1 || true
                 done
-                sudo install -d -o ubuntu -m 0755 /tmp/probe-runner
-                sudo cp /bin/sleep /tmp/probe-runner/Runner.Worker
-                sudo pkill -f '/tmp/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
-                /tmp/probe-runner/Runner.Worker 90 &
+                sudo install -d -o ubuntu -m 0755 /usr/local/lib/probe-runner
+                # 26.04's /bin/sleep is a COREUTILS MULTI-CALL binary: copied under any other
+                # name it refuses to run - and its refusal reads like a kernel policy -
+                #   Security violation: Requested utility `Runner` does not match executable name
+                # (reproduced on a plain ubuntu:26.04 with Foo.Bar and sleep.Worker too). gzip is a
+                # standalone binary: it keeps the kernel-assigned comm, and blocking on stdin makes
+                # it a better fixture than a timed sleep anyway.
+                sudo cp /usr/bin/gzip /usr/local/lib/probe-runner/Runner.Worker
+                sudo pkill -f '/usr/local/lib/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
+                /usr/local/lib/probe-runner/Runner.Worker < /dev/zero > /dev/null 2>&1 &
                 fake=$!
-                trap 'kill $fake 2>/dev/null || true; sudo rm -rf /tmp/probe-runner' EXIT
+                trap 'kill $fake 2>/dev/null || true; sudo rm -rf /usr/local/lib/probe-runner' EXIT
                 test "$(pgrep -xc Runner.Worker)" = 1
                 sudo -u ubuntu docker buildx create --name probe-keep --driver docker-container >/dev/null
                 sleep 2
@@ -645,7 +677,7 @@ check-githubrunner-ubuntu-vm:
               id: unprivileged-user-namespaces
               description: |
                 Unprivileged user namespaces work in the guest, and the AppArmor restriction
-                Ubuntu 24.04 enables by default is off. This is what lets a lane sandbox
+                Ubuntu 26.04 enables by default is off. This is what lets a lane sandbox
                 itself with bubblewrap (Image Runtime Startup failed on 2026-10-10 with
                 `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`) and what any
                 rootless-container step inside a job needs. The command asserts the real
@@ -757,7 +789,7 @@ check-githubrunner-ubuntu-vm:
               command: |
                 set -eu
                 # strays from an earlier step must not masquerade as an active job
-                sudo pkill -f '/tmp/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
+                sudo pkill -f '/usr/local/lib/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
                 sleep 1
                 test "$(pgrep -xc Runner.Worker 2>/dev/null || true)" = 0
                 # idempotent: this step runs at deploy-add AND at check-live
@@ -788,12 +820,18 @@ check-githubrunner-ubuntu-vm:
                 set -eu
                 for c in probe-pressure buildx_buildkit_probe-runner0; do docker rm -f "$c" >/dev/null 2>&1 || true; done
                 docker volume rm probe-pressure >/dev/null 2>&1 || true
-                sudo install -d -o ubuntu -m 0755 /tmp/probe-runner
-                sudo cp /bin/sleep /tmp/probe-runner/Runner.Worker
-                sudo pkill -f '/tmp/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
-                /tmp/probe-runner/Runner.Worker 90 &
+                sudo install -d -o ubuntu -m 0755 /usr/local/lib/probe-runner
+                # 26.04's /bin/sleep is a COREUTILS MULTI-CALL binary: copied under any other
+                # name it refuses to run - and its refusal reads like a kernel policy -
+                #   Security violation: Requested utility `Runner` does not match executable name
+                # (reproduced on a plain ubuntu:26.04 with Foo.Bar and sleep.Worker too). gzip is a
+                # standalone binary: it keeps the kernel-assigned comm, and blocking on stdin makes
+                # it a better fixture than a timed sleep anyway.
+                sudo cp /usr/bin/gzip /usr/local/lib/probe-runner/Runner.Worker
+                sudo pkill -f '/usr/local/lib/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
+                /usr/local/lib/probe-runner/Runner.Worker < /dev/zero > /dev/null 2>&1 &
                 fake=$!
-                trap 'kill $fake 2>/dev/null || true; sudo rm -rf /tmp/probe-runner' EXIT
+                trap 'kill $fake 2>/dev/null || true; sudo rm -rf /usr/local/lib/probe-runner' EXIT
                 test "$(pgrep -xc Runner.Worker)" = 1
                 docker pull -q alpine >/dev/null
                 docker volume create probe-pressure >/dev/null
@@ -803,7 +841,7 @@ check-githubrunner-ubuntu-vm:
                 test "$(pgrep -xc Runner.Worker)" = 1
                 kill "$fake" 2>/dev/null || true
                 trap - EXIT
-                sudo rm -rf /tmp/probe-runner
+                sudo rm -rf /usr/local/lib/probe-runner
                 printf 'PRESSURE-PURGE-OK\n'
 # Disposable R10 test bed for the ubuntu bootstrap VM (kind:check — the
 # 2026-05 deploy→check unification moved repo-shipped disposable beds out of
