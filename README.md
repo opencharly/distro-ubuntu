@@ -1,7 +1,7 @@
 # distro-ubuntu
 
 The **Ubuntu image family** for [OpenCharly](https://github.com/opencharly/charly) —
-deb-family, on the upstream `ubuntu:26.04` base.
+deb-family, on the upstream `ubuntu:24.04` base.
 
 This repo is mounted as a git submodule at `box/ubuntu` of the main repo. It
 contains **no candies of its own** and carries no build-config file: every candy
@@ -21,7 +21,7 @@ carries both distro configs, so the inheritance resolves with no import.
 | Check bed | `check-ubuntu-debootstrap-vm` (disposable bootstrap-VM bed), `check-githubrunner-ubuntu-vm` (CI-runner VM R10 bed) |
 
 The `ubuntu` base runs as uid-1000 `ubuntu` via **adopt mode** — the upstream
-`ubuntu:26.04` image ships a pre-existing `ubuntu:ubuntu` account, and the
+`ubuntu:24.04` image ships a pre-existing `ubuntu:ubuntu` account, and the
 embedded `distro.ubuntu` vocabulary adopts it rather than creating a new user.
 
 ## No coupling with main
@@ -29,7 +29,7 @@ embedded `distro.ubuntu` vocabulary adopts it rather than creating a new user.
 Nothing in the main `opencharly` repo consumes any Ubuntu image (no
 `base: ubuntu` image stays in main), so there is no main ↔ ubuntu coupling: the
 only edge is `ubuntu → main` (this repo pulls candies via `@github` refs). The
-image DAG is acyclic (`ubuntu-builder → ubuntu → docker.io/ubuntu:26.04`;
+image DAG is acyclic (`ubuntu-builder → ubuntu → docker.io/ubuntu:24.04`;
 `ubuntu-debootstrap → ubuntu-debootstrap-builder → docker.io/debian:13`).
 
 ## Build
@@ -62,7 +62,7 @@ charly -C box/ubuntu check run check-ubuntu-debootstrap-vm
 
 ## CI runners (`githubrunner-ubuntu` / `check-githubrunner-ubuntu-vm`)
 
-The Ubuntu half of the org's self-hosted CI fleet: a `kind: vm` entity (cloud_image resolute,
+The Ubuntu half of the org's self-hosted CI fleet: a `kind: vm` entity (cloud_image noble,
 UEFI-insecure, q35, 128 GiB / 32 GiB / 16 vCPU) that four GitHub Actions runner instances
 share. It exists because the Blacksmith-shaped CI of `opencharly/openclaw-enterprise` needs a
 rootful Docker daemon, privileged k3s node containers, systemd and apt + passwordless sudo —

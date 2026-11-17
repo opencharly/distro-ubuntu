@@ -1,7 +1,7 @@
 ---
 name: githubrunner-ubuntu
 description: |-
-  The CI-runner Ubuntu VM (kind:vm, cloud_image resolute) — the fleet substrate that
+  The CI-runner Ubuntu VM (kind:vm, cloud_image noble) — the fleet substrate that
   runs the Blacksmith-shaped CI of opencharly/openclaw-enterprise on host `no`,
   with a rootful Docker daemon pinned to the version the CI asserts, a
   co-tenant-safe daemon/socket split for several runners on one host, a docker
@@ -13,7 +13,7 @@ description: |-
 # githubrunner-ubuntu
 
 The `kind: vm` entity behind the Ubuntu half of the org's self-hosted CI
-fleet. Boots the upstream resolute cloud image under libvirt/QEMU (UEFI
+fleet. Boots the upstream noble cloud image under libvirt/QEMU (UEFI
 insecure, q35) and provisions, through cloud-init, a rootful Docker daemon
 that several concurrent CI runners can share safely.
 
