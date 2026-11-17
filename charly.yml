@@ -647,12 +647,12 @@ check-githubrunner-ubuntu-vm:
                   sudo -u ubuntu docker buildx rm --force "$b" >/dev/null 2>&1 || true
                   sudo -u ubuntu docker rm -f "buildx_buildkit_${b}0" >/dev/null 2>&1 || true
                 done
-                sudo install -d -o ubuntu -m 0755 /tmp/probe-runner
-                sudo cp /bin/sleep /tmp/probe-runner/Runner.Worker
-                sudo pkill -f '/tmp/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
-                /tmp/probe-runner/Runner.Worker 90 &
+                sudo install -d -o ubuntu -m 0755 /usr/local/lib/probe-runner
+                sudo cp /bin/sleep /usr/local/lib/probe-runner/Runner.Worker
+                sudo pkill -f '/usr/local/lib/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
+                /usr/local/lib/probe-runner/Runner.Worker 90 &
                 fake=$!
-                trap 'kill $fake 2>/dev/null || true; sudo rm -rf /tmp/probe-runner' EXIT
+                trap 'kill $fake 2>/dev/null || true; sudo rm -rf /usr/local/lib/probe-runner' EXIT
                 test "$(pgrep -xc Runner.Worker)" = 1
                 sudo -u ubuntu docker buildx create --name probe-keep --driver docker-container >/dev/null
                 sleep 2
@@ -783,7 +783,7 @@ check-githubrunner-ubuntu-vm:
               command: |
                 set -eu
                 # strays from an earlier step must not masquerade as an active job
-                sudo pkill -f '/tmp/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
+                sudo pkill -f '/usr/local/lib/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
                 sleep 1
                 test "$(pgrep -xc Runner.Worker 2>/dev/null || true)" = 0
                 # idempotent: this step runs at deploy-add AND at check-live
@@ -814,12 +814,12 @@ check-githubrunner-ubuntu-vm:
                 set -eu
                 for c in probe-pressure buildx_buildkit_probe-runner0; do docker rm -f "$c" >/dev/null 2>&1 || true; done
                 docker volume rm probe-pressure >/dev/null 2>&1 || true
-                sudo install -d -o ubuntu -m 0755 /tmp/probe-runner
-                sudo cp /bin/sleep /tmp/probe-runner/Runner.Worker
-                sudo pkill -f '/tmp/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
-                /tmp/probe-runner/Runner.Worker 90 &
+                sudo install -d -o ubuntu -m 0755 /usr/local/lib/probe-runner
+                sudo cp /bin/sleep /usr/local/lib/probe-runner/Runner.Worker
+                sudo pkill -f '/usr/local/lib/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
+                /usr/local/lib/probe-runner/Runner.Worker 90 &
                 fake=$!
-                trap 'kill $fake 2>/dev/null || true; sudo rm -rf /tmp/probe-runner' EXIT
+                trap 'kill $fake 2>/dev/null || true; sudo rm -rf /usr/local/lib/probe-runner' EXIT
                 test "$(pgrep -xc Runner.Worker)" = 1
                 docker pull -q alpine >/dev/null
                 docker volume create probe-pressure >/dev/null
@@ -829,7 +829,7 @@ check-githubrunner-ubuntu-vm:
                 test "$(pgrep -xc Runner.Worker)" = 1
                 kill "$fake" 2>/dev/null || true
                 trap - EXIT
-                sudo rm -rf /tmp/probe-runner
+                sudo rm -rf /usr/local/lib/probe-runner
                 printf 'PRESSURE-PURGE-OK\n'
 # Disposable R10 test bed for the ubuntu bootstrap VM (kind:check — the
 # 2026-05 deploy→check unification moved repo-shipped disposable beds out of

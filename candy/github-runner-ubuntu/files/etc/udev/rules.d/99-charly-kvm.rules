@@ -1,5 +1,0 @@
-# /dev/kvm must be group-writable by `kvm` so the unprivileged runner user can drive the
-# nested k3s/dind lanes. Measured on 26.04: the guest HAS /dev/kvm (nested virt works once the
-# CPU model is passed through) but it arrives owned in a way the runner cannot write, so the
-# bed's check-kvm-device fails on the WRITE assertion, not on the device's existence.
-KERNEL=="kvm", GROUP="kvm", MODE="0660"
