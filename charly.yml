@@ -153,6 +153,12 @@ githubrunner-ubuntu:
         # a property of THIS VM, not of the recipe installed into it
         # (opencharly/distro-ubuntu#67).
         libvirt:
+            # NESTED VIRTUALISATION. The runner's k3s/dind lanes want /dev/kvm, and the bed's
+            # check-kvm-device asserts it whenever /proc/cpuinfo exposes svm/vmx. A guest that
+            # sees the flags but cannot load kvm still has no /dev/kvm, so the CPU model is
+            # passed through rather than synthesized.
+            cpu:
+                mode: host-passthrough
             # The fragment must nest inside <devices>: xml_passthrough is unmarshalled as a
             # <domain> body and merged field-wise, and only the CHILDREN of <devices> are
             # appended (Channels, Controllers, ...). A top-level <channel> parses into a
