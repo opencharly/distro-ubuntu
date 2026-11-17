@@ -144,6 +144,26 @@ githubrunner-ubuntu:
         # (decision D1, issue 37).
         cloud_init:
             timezone: UTC
+        # Ubuntu 26.04 gates qemu-guest-agent.service on a virtio-serial port
+        # (dev-virtio\x2dports-org.qemu.guest_agent.0.device). Without the channel that
+        # .device never appears, the unit's start job fails, and the PACKAGE'S OWN
+        # postinst returns non-zero - which aborts the apt transaction and therefore the
+        # deploy, before any charly step runs. 24.04 tolerated the same absence; 26.04
+        # does not. The channel is declared here rather than in the candy because it is
+        # a property of THIS VM, not of the recipe installed into it
+        # (opencharly/distro-ubuntu#67).
+        libvirt:
+            # The fragment must nest inside <devices>: xml_passthrough is unmarshalled as a
+            # <domain> body and merged field-wise, and only the CHILDREN of <devices> are
+            # appended (Channels, Controllers, ...). A top-level <channel> parses into a
+            # Domain field that libvirt does not read, so it is silently dropped.
+            xml_passthrough: |
+                <devices>
+                  <controller type='virtio-serial' index='0'/>
+                  <channel type='unix'>
+                    <target type='virtio' name='org.qemu.guest_agent.0'/>
+                  </channel>
+                </devices>
 # Disposable R10 bed for the CI-runner VM entity above. `disposable: true` is the sole
 # authorization for the unattended destroy+rebuild `charly check run` drives. Every step
 # is anchored on the MECHANISM it proves, never on a proxy for it: the pinned Docker
