@@ -10,6 +10,12 @@ github-runner-ubuntu:
             never committed. `charly-register-runners` takes the org, name prefix, labels and
             count, so one script serves a single VM or a multi-VM fleet.
         distro:
+            ubuntu-24.04:
+                package:
+                    - libicu74
+            ubuntu-26.04:
+                package:
+                    - libicu78
             ubuntu:
                 package:
                     - git
@@ -28,7 +34,10 @@ github-runner-ubuntu:
                     - gnupg
                     - apt-transport-https
                     - qemu-guest-agent
-                    - libicu74
+                    # libicu is VERSIONED BY ABI: 24.04 ships libicu74, 26.04 ships
+                    # libicu78, and the wrong name is `E: Unable to locate package`.
+                    # The generic `ubuntu:` list cannot name it, so it moves into the
+                    # per-release sections below.
                     - libkrb5-3
                     - libssl3t64
                     - libunwind8
@@ -162,6 +171,34 @@ github-runner-ubuntu:
               mode: "0644"
               run_as: root
               id: "file-12-99-charly-ci-userns-conf"
+            - run: "apply the userns sysctl now — a sysctl.d drop-in is inert until systemd-sysctl runs at boot"
+              # MEASURED on 26.04: the drop-in above sets
+              # kernel.apparmor_restrict_unprivileged_userns=0, but installing the file does not
+              # APPLY it. The bed checks immediately after deploy, on a guest that has not
+              # rebooted, so it read the distro default — which 26.04 sets to 1 — and failed with
+              #   Security violation: Requested utility `Runner` does not match executable name
+              # for every bwrap/rootless lane. 24.04 masked this because its default agreed with
+              # the file; the file was never the whole fix.
+              command: |
+                  sysctl -p /etc/sysctl.d/99-charly-ci-userns.conf
+              run_as: root
+              context: [runtime]
+              id: "apply-userns-sysctl"
+            - run: "install /etc/udev/rules.d/99-charly-kvm.rules as 0644"
+              # /dev/kvm exists under host-passthrough but is not writable by the runner user
+              # without this; see the rule's own comment for the measurement.
+              copy: "files/etc/udev/rules.d/99-charly-kvm.rules"
+              to: "/etc/udev/rules.d/99-charly-kvm.rules"
+              mode: "0644"
+              run_as: root
+              id: "file-12b-charly-kvm-udev"
+            - run: "apply the kvm udev rule to the device that is already present"
+              command: |
+                  udevadm control --reload-rules
+                  udevadm trigger --name-match=kvm
+              run_as: root
+              context: [runtime]
+              id: "apply-kvm-udev"
             - run: "install /etc/systemd/journald.conf.d/charly-ci.conf as 0644"
               copy: "files/etc/systemd/journald.conf.d/charly-ci.conf"
               to: "/etc/systemd/journald.conf.d/charly-ci.conf"
@@ -173,7 +210,16 @@ github-runner-ubuntu:
               run_as: root
               context: [deploy]
               command: |
-                  systemctl enable --now qemu-guest-agent
+                  # 26.04 ships qemu-guest-agent.service as an ACTIVATION-driven unit with
+                  # no [Install] section, so `enable` is not merely unnecessary there - it
+                  # fails ("The unit files have no installation config") and the subsequent
+                  # dependency job aborts the deploy. `start` is the verb that works on both
+                  # shapes; `enable` is only meaningful where the unit advertises [Install].
+                  if systemctl enable --now qemu-guest-agent 2>/dev/null; then
+                      :
+                  else
+                      systemctl start qemu-guest-agent
+                  fi
             - run: "step 2 \u2014 install -m 0755 -d /etc/apt/keyrings"
               id: "cmd-02-install-m-0755-d-etc-apt-keyrings"
               run_as: root
@@ -197,7 +243,7 @@ github-runner-ubuntu:
               run_as: root
               context: [deploy]
               command: |
-                  printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable\n' > /etc/apt/sources.list.d/docker.list
+                  printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu resolute stable\n' > /etc/apt/sources.list.d/docker.list
             - run: "step 6 \u2014 apt-get update -qq"
               id: "cmd-06-apt-get-update-qq"
               run_as: root
@@ -209,7 +255,7 @@ github-runner-ubuntu:
               run_as: root
               context: [deploy]
               command: |
-                  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --allow-downgrades docker-ce=5:29.4.0-1~ubuntu.24.04~noble docker-ce-cli=5:29.4.0-1~ubuntu.24.04~noble containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+                  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --allow-downgrades docker-ce=5:29.4.0-1~ubuntu.26.04~resolute docker-ce-cli=5:29.4.0-1~ubuntu.26.04~resolute containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
             - run: "step 8 \u2014 apt-mark hold docker-ce docker-ce-cli"
               id: "cmd-08-apt-mark-hold-docker-ce-docker-ce-cli"
               run_as: root
@@ -231,10 +277,12 @@ github-runner-ubuntu:
                   export DEBIAN_FRONTEND=noninteractive
                   apt-get update -qq
                   apt-get install -y -qq --no-install-recommends software-properties-common
-                  # A CURRENT git: noble ships 2.43, and the repo's provenance tests call
-                  # `git --no-lazy-fetch` (added in 2.46). GitHub-hosted images carry a newer
-                  # git, so this is hosted parity, not a local preference. Measured: the
-                  # Scripts job failed with `unknown option: --no-lazy-fetch`.
+                  # A CURRENT git: the repo's provenance tests call `git --no-lazy-fetch` (added in
+                  # 2.46), and the distro's git may be older than that. GitHub-hosted images carry a
+                  # newer git, so this is hosted parity, not a local preference. Measured on the
+                  # previous Ubuntu baseline (noble): the Scripts job failed with
+                  # `unknown option: --no-lazy-fetch`. Kept for 26.04 because this pin is not
+                  # re-measured here, and a redundant PPA is harmless where a missing flag is not.
                   add-apt-repository -y ppa:git-core/ppa
                   apt-get update -qq
                   # The full hosted-parity job toolchain, INCLUDING Chromium's runtime set.
@@ -537,15 +585,23 @@ github-runner-ubuntu:
               run_as: root
               context: [runtime]
               command: |
-                  set -euo pipefail
-                  id -nG ubuntu | tr ' ' '\n' | grep -qx kvm
-                  if grep -q -m1 -ow 'svm\|vmx' /proc/cpuinfo; then
-                    test -c /dev/kvm
-                    sudo -u ubuntu test -w /dev/kvm
-                    echo kvm-device-ok
-                  else
-                    echo kvm-device-skipped-no-virt-cpu
-                  fi
+                  set -uo pipefail
+                  # A check that dies under `set -e` with an EMPTY stderr cannot be diagnosed:
+                  # on 26.04 this reported exit=1 with no output at all, and the three
+                  # assertions below were indistinguishable. Each one now names itself.
+                  if ! id -nG ubuntu | tr ' ' '\n' | grep -qx kvm; then
+                    echo "FAIL: the ubuntu user is not in the kvm group" >&2; exit 1; fi
+                  if ! grep -q -m1 -ow 'svm\|vmx' /proc/cpuinfo; then
+                    echo kvm-device-skipped-no-virt-cpu; exit 0; fi
+                  if ! test -c /dev/kvm; then
+                    echo "FAIL: /proc/cpuinfo exposes svm/vmx but /dev/kvm does not exist" >&2
+                    ls -l /dev/kvm 2>&1 >/dev/null || true
+                    lsmod 2>/dev/null | grep -E '^kvm' || echo "  (no kvm module loaded)" >&2
+                    exit 1; fi
+                  if ! sudo -u ubuntu test -w /dev/kvm; then
+                    echo "FAIL: /dev/kvm exists but the ubuntu user cannot write it" >&2
+                    ls -l /dev/kvm >&2; exit 1; fi
+                  echo kvm-device-ok
             # The k3s lanes `sudo modprobe br_netfilter` and set the bridge sysctl. Both are
             # host-root operations, so the image performs them at boot and this asserts the
             # RESULT — module loaded and the sysctl value actually in force.
