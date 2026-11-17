@@ -175,10 +175,15 @@ github-runner-ubuntu:
               # MEASURED on 26.04: the drop-in above sets
               # kernel.apparmor_restrict_unprivileged_userns=0, but installing the file does not
               # APPLY it. The bed checks immediately after deploy, on a guest that has not
-              # rebooted, so it read the distro default — which 26.04 sets to 1 — and failed with
-              #   Security violation: Requested utility `Runner` does not match executable name
-              # for every bwrap/rootless lane. 24.04 masked this because its default agreed with
-              # the file; the file was never the whole fix.
+              # rebooted, so it read the distro default — which 26.04 sets to 1 — and the bed's
+              # `unprivileged-user-namespaces` check failed: `unshare --user --map-root-user` is
+              # denied and the sysctl reads 1 instead of 0. 24.04 masked this because its default
+              # agreed with the file; the file was never the whole fix.
+              #
+              # NOTE: an earlier revision of this comment quoted a "Security violation: Requested
+              # utility `Runner`" line here. That message is NOT from this restriction - it is
+              # coreutils refusing to run a renamed sleep binary, proven later in this same PR.
+              # The two failures were unrelated and this comment conflated them.
               command: |
                   sysctl -p /etc/sysctl.d/99-charly-ci-userns.conf
               run_as: root
