@@ -648,9 +648,15 @@ check-githubrunner-ubuntu-vm:
                   sudo -u ubuntu docker rm -f "buildx_buildkit_${b}0" >/dev/null 2>&1 || true
                 done
                 sudo install -d -o ubuntu -m 0755 /usr/local/lib/probe-runner
-                sudo cp /bin/sleep /usr/local/lib/probe-runner/Runner.Worker
+                # 26.04's /bin/sleep is a COREUTILS MULTI-CALL binary: copied under any other
+                # name it refuses to run - and its refusal reads like a kernel policy -
+                #   Security violation: Requested utility `Runner` does not match executable name
+                # (reproduced on a plain ubuntu:26.04 with Foo.Bar and sleep.Worker too). gzip is a
+                # standalone binary: it keeps the kernel-assigned comm, and blocking on stdin makes
+                # it a better fixture than a timed sleep anyway.
+                sudo cp /usr/bin/gzip /usr/local/lib/probe-runner/Runner.Worker
                 sudo pkill -f '/usr/local/lib/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
-                /usr/local/lib/probe-runner/Runner.Worker 90 &
+                /usr/local/lib/probe-runner/Runner.Worker < /dev/zero > /dev/null 2>&1 &
                 fake=$!
                 trap 'kill $fake 2>/dev/null || true; sudo rm -rf /usr/local/lib/probe-runner' EXIT
                 test "$(pgrep -xc Runner.Worker)" = 1
@@ -815,9 +821,15 @@ check-githubrunner-ubuntu-vm:
                 for c in probe-pressure buildx_buildkit_probe-runner0; do docker rm -f "$c" >/dev/null 2>&1 || true; done
                 docker volume rm probe-pressure >/dev/null 2>&1 || true
                 sudo install -d -o ubuntu -m 0755 /usr/local/lib/probe-runner
-                sudo cp /bin/sleep /usr/local/lib/probe-runner/Runner.Worker
+                # 26.04's /bin/sleep is a COREUTILS MULTI-CALL binary: copied under any other
+                # name it refuses to run - and its refusal reads like a kernel policy -
+                #   Security violation: Requested utility `Runner` does not match executable name
+                # (reproduced on a plain ubuntu:26.04 with Foo.Bar and sleep.Worker too). gzip is a
+                # standalone binary: it keeps the kernel-assigned comm, and blocking on stdin makes
+                # it a better fixture than a timed sleep anyway.
+                sudo cp /usr/bin/gzip /usr/local/lib/probe-runner/Runner.Worker
                 sudo pkill -f '/usr/local/lib/probe-runner/Runner.Worker' >/dev/null 2>&1 || true
-                /usr/local/lib/probe-runner/Runner.Worker 90 &
+                /usr/local/lib/probe-runner/Runner.Worker < /dev/zero > /dev/null 2>&1 &
                 fake=$!
                 trap 'kill $fake 2>/dev/null || true; sudo rm -rf /usr/local/lib/probe-runner' EXIT
                 test "$(pgrep -xc Runner.Worker)" = 1
