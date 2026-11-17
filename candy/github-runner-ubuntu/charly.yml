@@ -10,6 +10,12 @@ github-runner-ubuntu:
             never committed. `charly-register-runners` takes the org, name prefix, labels and
             count, so one script serves a single VM or a multi-VM fleet.
         distro:
+            ubuntu-24.04:
+                package:
+                    - libicu74
+            ubuntu-26.04:
+                package:
+                    - libicu78
             ubuntu:
                 package:
                     - git
@@ -28,7 +34,10 @@ github-runner-ubuntu:
                     - gnupg
                     - apt-transport-https
                     - qemu-guest-agent
-                    - libicu74
+                    # libicu is VERSIONED BY ABI: 24.04 ships libicu74, 26.04 ships
+                    # libicu78, and the wrong name is `E: Unable to locate package`.
+                    # The generic `ubuntu:` list cannot name it, so it moves into the
+                    # per-release sections below.
                     - libkrb5-3
                     - libssl3t64
                     - libunwind8
@@ -173,7 +182,16 @@ github-runner-ubuntu:
               run_as: root
               context: [deploy]
               command: |
-                  systemctl enable --now qemu-guest-agent
+                  # 26.04 ships qemu-guest-agent.service as an ACTIVATION-driven unit with
+                  # no [Install] section, so `enable` is not merely unnecessary there - it
+                  # fails ("The unit files have no installation config") and the subsequent
+                  # dependency job aborts the deploy. `start` is the verb that works on both
+                  # shapes; `enable` is only meaningful where the unit advertises [Install].
+                  if systemctl enable --now qemu-guest-agent 2>/dev/null; then
+                      :
+                  else
+                      systemctl start qemu-guest-agent
+                  fi
             - run: "step 2 \u2014 install -m 0755 -d /etc/apt/keyrings"
               id: "cmd-02-install-m-0755-d-etc-apt-keyrings"
               run_as: root
