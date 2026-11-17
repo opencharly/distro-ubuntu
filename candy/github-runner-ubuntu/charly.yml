@@ -598,12 +598,13 @@ github-runner-ubuntu:
                     ls -l /dev/kvm 2>&1 >/dev/null || true
                     lsmod 2>/dev/null | grep -E '^kvm' || echo "  (no kvm module loaded)" >&2
                     exit 1; fi
-                  if ! sudo -u ubuntu test -w /dev/kvm; then
-                    # The run summary truncates stderr at ~100 chars, so the DECISIVE comparison
-                    # goes first: the device's gid against the kvm group's gid against the groups
-                    # the runner's own sudo process actually carries.
-                    echo "FAIL acl=$(getfacl -cp /dev/kvm 2>/dev/null | grep -E '^(user|group|mask|other)' | tr '\n' ';') test=$(sudo -u ubuntu sh -c 'test -w /dev/kvm; echo $?')" >&2
-                    echo "mode=$(stat -c '%a %U %G' /dev/kvm) nG=$(id -nG ubuntu | tr ' ' ',')" >&2
+                  # MEASURED: `sudo -u ubuntu test -w /dev/kvm` fails while
+                  # `sudo -u ubuntu sh -c 'test -w /dev/kvm'` returns 0. The standalone
+                  # /usr/bin/test binary is not what the runner user can execute there (secure_path
+                  # and the absence of a shell builtin both apply); the SHELL BUILTIN is the correct
+                  # way to ask the question, and it is the same question.
+                  if ! sudo -u ubuntu sh -c 'test -w /dev/kvm'; then
+                    echo "FAIL: /dev/kvm exists but the runner user cannot write it (ACL=$(getfacl -cp /dev/kvm 2>/dev/null | grep -cE '^(user|group|mask)' ) entries)" >&2
                     ls -l /dev/kvm >&2
                     exit 1; fi
                   echo kvm-device-ok
