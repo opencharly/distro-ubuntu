@@ -645,7 +645,7 @@ check-githubrunner-ubuntu-vm:
               id: unprivileged-user-namespaces
               description: |
                 Unprivileged user namespaces work in the guest, and the AppArmor restriction
-                Ubuntu 26.04 enables by default is off. This is what lets a lane sandbox
+                Ubuntu 24.04 enables by default is off. This is what lets a lane sandbox
                 itself with bubblewrap (Image Runtime Startup failed on 2026-10-10 with
                 `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`) and what any
                 rootless-container step inside a job needs. The command asserts the real
