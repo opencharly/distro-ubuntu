@@ -3,14 +3,15 @@
 #  WHY THIS CANDY EXISTS (opencharly/sdk#434, operator ruling): a `skill:` node's `owner:` must
 #  name a CANDY. An image — a `candy:` node carrying `base:`/`from:` — has no source directory: the
 #  loader folds it into the image set and never the layer set, so an image-owned skill's prose can
-#  never be read AND the node is silently absent from the `ai.opencharly.skill` OCI label.
-#  The 5 `skill:` nodes below were all owned by an image; this candy owns them instead, and their
-#  bodies live beside this manifest under `.agents/skills/<name>/SKILL.md` (the Agent-Skills
-#  standard tree) — the one place the marketplace/docs generators and the label projection read.
+#  never be read. This candy owns the `skill:` nodes below instead, and their bodies live at THIS
+#  REPO'S ROOT, `.agents/skills/<name>/SKILL.md` (the Agent-Skills standard tree) — the one base the
+#  marketplace/docs generators and charly's install read (`deploykit.candyRepoRoot`).
 #
-#  THE CANDY CARRIES THE PROSE INTO THE IMAGE: composed into every image that carries one of these
-#  skills, it installs the tree at the uid-1000 account's `~/.agents/skills` — the location a
-#  harness running inside the image reads — and its ADE `check:` proves the install landed.
+#  THE INSTALL IS CHARLY'S, NOT THIS CANDY'S: for every image that composes this candy, kind:skill
+#  installs the body of each skill it owns at the image user's `~/.agents/skills/<name>/` and carries
+#  it whole in the `ai.opencharly.skill` label (opencharly/sdk#598). The candy's former
+#  `copy: .agents/skills` step resolved against its own staged directory and could never reach the
+#  repo root (opencharly/sdk#444). Its ADE `check:` proves the bodies landed in the image.
 ubuntu-skills:
     candy:
         description: |
@@ -20,16 +21,12 @@ ubuntu-skills:
             It exists because a `skill:` node's owner must be a candy, not an image — an image has
             no source directory, so an image-owned node's prose is unreadable and the skill is
             absent from the ai.opencharly.skill OCI label (opencharly/sdk#434).
-            Composed into every image that carries one of those skills; installs the tree at the
-            uid-1000 account's ~/.agents/skills so a harness in the image reads the same prose the
-            label carries.
+            Composed into every image that carries one of those skills. Charly installs the body of
+            every skill an image composes under the image user's ~/.agents/skills and labels it
+            ai.opencharly.skill (kind:skill's owned content, opencharly/sdk#598), so a harness in the
+            image reads the same prose the label carries; this candy owns the nodes and ships no
+            install step of its own.
         plan:
-            - run: install the skill tree at the uid-1000 account's Agent-Skills location
-              id: install-skill-tree
-              copy: .agents/skills
-              to: "${HOME}/.agents/skills"
-              run_as: "${USER}"
-              comment: the bodies the ai.opencharly.skill label projects, made readable in-image
             - check: every skill body this candy carries is installed under the uid-1000 account's ~/.agents/skills
               id: skill-bodies-installed
               context:
